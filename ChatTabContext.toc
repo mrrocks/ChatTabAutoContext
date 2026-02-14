@@ -1,0 +1,6 @@
+## Interface: 120001
+## Title: Chat Tabs Context
+## Author: mrrocks
+## Version: 1.0.0
+## Notes: Automatically switches chat context to active chat tab.
+main.lua
