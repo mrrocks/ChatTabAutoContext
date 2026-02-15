@@ -1,8 +1,8 @@
 ## Interface: 120001
-## Title: Chat Tabs Context
+## Title: Chat Tabs Auto Context
 ## Author: mrrocks
 ## Version: @project-version@
-## Notes: Automatically switches chat context to active chat tab.
+## Notes: Automatically syncs chat input with the active tab and lets you cycle tabs with Tab/Shift+Tab while preserving channel and whisper context.
 main.lua
 src/chat_api.lua
 src/frame_context.lua

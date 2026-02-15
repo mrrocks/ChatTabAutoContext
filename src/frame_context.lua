@@ -2,6 +2,13 @@ local _, ns = ...
 
 local lastSelectedChatFrame
 
+local function NormalizeFrameLabel(value)
+    if type(value) ~= "string" or value == "" then
+        return nil
+    end
+    return strlower(value:gsub("%s+", ""))
+end
+
 function ns.SetLastSelectedChatFrame(frame)
     lastSelectedChatFrame = frame
 end
@@ -61,6 +68,32 @@ function ns.IsValidChatFrame(frame)
     return frame and frame.editBox and type(frame.GetName) == "function"
 end
 
+local function IsCombatLogLabel(value)
+    local normalizedValue = NormalizeFrameLabel(value)
+    if not normalizedValue then
+        return false
+    end
+    if normalizedValue == "combatlog" then
+        return true
+    end
+
+    local normalizedCombatLogName = NormalizeFrameLabel(COMBAT_LOG)
+    if normalizedCombatLogName and normalizedValue == normalizedCombatLogName then
+        return true
+    end
+
+    local normalizedCombatLogAlias = NormalizeFrameLabel(COMBATLOG)
+    if normalizedCombatLogAlias and normalizedValue == normalizedCombatLogAlias then
+        return true
+    end
+
+    if normalizedValue == "log" and (normalizedCombatLogName == "log" or normalizedCombatLogAlias == "log") then
+        return true
+    end
+
+    return false
+end
+
 function ns.IsCombatLogFrame(frame)
     if not ns.IsValidChatFrame(frame) then
         return false
@@ -68,14 +101,56 @@ function ns.IsCombatLogFrame(frame)
     if frame.isCombatLog then
         return true
     end
-    local windowName = ns.GetFrameWindowName(frame)
-    if windowName and COMBAT_LOG then
-        local normalizedWindowName = strlower(windowName:gsub("%s+", ""))
-        local normalizedCombatLogName = strlower(COMBAT_LOG:gsub("%s+", ""))
-        if normalizedWindowName == normalizedCombatLogName then
+
+    local frameId = frame.GetID and frame:GetID()
+    if type(COMBATLOG) == "number" and frameId and frameId == COMBATLOG then
+        return true
+    end
+
+    if type(FCF_GetCombatLogFrame) == "function" then
+        local combatLogFrame = FCF_GetCombatLogFrame()
+        if combatLogFrame and combatLogFrame == frame then
             return true
         end
     end
+
+    if IsCombatLogLabel(ns.GetFrameWindowName(frame)) then
+        return true
+    end
+
+    local tabText = _G[frame:GetName() .. "TabText"]
+    if tabText and type(tabText.GetText) == "function" and IsCombatLogLabel(tabText:GetText()) then
+        return true
+    end
+
+    return false
+end
+
+local function IsCyclableChatFrame(frame)
+    if not ns.IsValidChatFrame(frame) then
+        return false
+    end
+    if ns.IsCombatLogFrame(frame) then
+        return false
+    end
+
+    if type(ns.IsWhisperType) == "function" then
+        if ns.IsWhisperType(frame.chatType) then
+            return true
+        end
+        local editBoxChatType = frame.editBox and frame.editBox:GetAttribute("chatType")
+        if ns.IsWhisperType(editBoxChatType) then
+            return true
+        end
+    end
+
+    if type(ns.GetFrameDefaultChatTarget) == "function" then
+        local defaultChatType = ns.GetFrameDefaultChatTarget(frame)
+        if defaultChatType then
+            return true
+        end
+    end
+
     return false
 end
 
@@ -99,7 +174,7 @@ function ns.GetOrderedChatFrames(includeUnselectable)
         if not ns.IsValidChatFrame(frame) or seenFrames[frame] then
             return
         end
-        if ns.IsCombatLogFrame(frame) then
+        if not IsCyclableChatFrame(frame) then
             return
         end
         if not includeUnselectable and not ns.IsSelectableChatFrame(frame) then
