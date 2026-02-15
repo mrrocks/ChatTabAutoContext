@@ -4,3 +4,8 @@
 ## Version: 1.0.0
 ## Notes: Automatically switches chat context to active chat tab.
 main.lua
+src/chat_api.lua
+src/frame_context.lua
+src/whisper_context.lua
+src/default_target.lua
+src/hooks.lua
