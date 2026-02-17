@@ -1,0 +1,7 @@
+Chat Tabs Auto Context (@project-version@)
+
+- Exclude combat-log and log-only tabs from tab cycling by filtering to frames with valid chat contexts. Update addon metadata to reflect Chat Tabs Auto Context behavior.
+- Align CurseForge packaging metadata with the ChatTabAutoContext addon identity by adding .pkgmeta and renaming the TOC file. Use an unnamed private event frame to avoid depending on a global frame reuse path.
+- Enhance chat tab context by improving Enter-key handling and ensuring accurate channel resolution. Refactor logic to maintain last-used channel behavior and prevent fallback issues during combat lockdown.
+- Refactor ChatTabContext into focused modules while preserving existing chat-context behavior.
+- Fix chat tab context target resolution and channel memory.
