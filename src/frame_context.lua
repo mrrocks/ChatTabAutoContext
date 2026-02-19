@@ -209,9 +209,6 @@ function ns.SelectAdjacentChatFrame(currentFrame, direction)
     if #chatFrames < 2 then
         return nil
     end
-    local names = {}
-    for _, f in ipairs(chatFrames) do names[#names + 1] = f:GetName() end
-    ns.DebugCycle(names)
     local selectedFrame = ns.GetChatFrameFromTab(currentFrame) or ns.GetSelectedChatFrame()
     local selectedIndex
     for index, frame in ipairs(chatFrames) do

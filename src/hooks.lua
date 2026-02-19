@@ -30,13 +30,10 @@ local function HandleEditBoxTabPressed(editBox)
     end
 
     if ns.IsWhisperType(nextFrame.chatType) then
-        ns.DebugTab(sourceFrame, nextFrame, "WHISPER", nil)
         ns.SetWhisperTarget(nextFrame, true)
         return true
     end
 
-    local chatType, channelTarget = ns.GetFrameDefaultChatTarget(nextFrame)
-    ns.DebugTab(sourceFrame, nextFrame, chatType, channelTarget)
     ns.OpenFrameContext(nextFrame)
     return true
 end
@@ -138,12 +135,9 @@ local function OnKeyDown(_, key)
             return
         end
         if ns.IsWhisperType(selectedFrame.chatType) then
-            ns.DebugEnter(selectedFrame, "WHISPER", nil)
             ns.SetWhisperTarget(selectedFrame, true)
             return
         end
-        local chatType, channelTarget = ns.GetFrameDefaultChatTarget(selectedFrame)
-        ns.DebugEnter(selectedFrame, chatType, channelTarget)
         ns.OpenFrameContext(selectedFrame)
     end)
 end
