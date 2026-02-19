@@ -5,6 +5,7 @@
 ## Notes: Automatically syncs chat input with the active tab and lets you cycle tabs with Tab/Shift+Tab while preserving channel and whisper context.
 main.lua
 src/chat_api.lua
+src/debug.lua
 src/frame_context.lua
 src/whisper_context.lua
 src/default_target.lua

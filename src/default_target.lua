@@ -53,8 +53,8 @@ local function ResolveChannelTarget(channelName)
         if not numericCandidate or numericCandidate <= 0 then
             return nil
         end
-        local localId = GetChannelName(numericCandidate)
-        if localId and localId > 0 then
+        local localId, localName = GetChannelName(numericCandidate)
+        if localId and localId > 0 and localName and localName ~= "" then
             return localId
         end
         return nil
@@ -265,7 +265,6 @@ function ns.GetFrameDefaultChatTarget(frame)
         MergeChannelTargets(GetChannelTargets(channelList), GetChannelTargets(zoneChannelList)),
         GetChannelTargets(apiChannelList)
     )
-    local configuredChannelCount = #channelTargets
     if #channelTargets == 0 and frame and frame.channelName then
         local resolvedChannelTarget = ResolveChannelTarget(frame.channelName)
         if resolvedChannelTarget then
@@ -360,55 +359,27 @@ function ns.GetFrameDefaultChatTarget(frame)
     return nil, nil
 end
 
-function ns.ApplyDefaultFrameContext(selectedFrame)
-    if not selectedFrame or not selectedFrame.editBox then
-        return nil, nil, nil
-    end
-
-    local chatType, channelTarget = ns.GetFrameDefaultChatTarget(selectedFrame)
-    if not chatType then
-        return nil, nil, nil
-    end
-
-    local editBox = selectedFrame.editBox
-    editBox:SetAttribute("chatType", chatType)
-    editBox:SetAttribute("stickyType", chatType)
-    if chatType == "CHANNEL" then
-        editBox:SetAttribute("channelTarget", channelTarget)
-    end
-    ns.UpdateEditBoxHeader(editBox)
-    return editBox, chatType, channelTarget
-end
-
 function ns.OpenFrameContext(selectedFrame)
     if not selectedFrame or not selectedFrame.editBox then
         return
     end
 
     ns.SetLastSelectedChatFrame(selectedFrame)
-    local editBox, chatType, channelTarget = ns.ApplyDefaultFrameContext(selectedFrame)
-    if not editBox then
+    local chatType, channelTarget = ns.GetFrameDefaultChatTarget(selectedFrame)
+    if not chatType then
         return
     end
 
-    if chatType == "CHANNEL" and channelTarget then
-        local channelCommand = "/" .. channelTarget .. " "
-        if ns.OpenChat(channelCommand, selectedFrame) then
-            if type(ChatEdit_ParseText) == "function" then
-                ChatEdit_ParseText(editBox, 0, true)
-            end
-            return
-        end
-
+    local editBox = selectedFrame.editBox
+    ns.RunOutOfCombat(function()
         ChatEdit_ActivateChat(editBox)
-        editBox:SetText(channelCommand)
-        if type(ChatEdit_ParseText) == "function" then
-            ChatEdit_ParseText(editBox, 0, true)
+        editBox:SetAttribute("chatType", chatType)
+        editBox:SetAttribute("stickyType", chatType)
+        if chatType == "CHANNEL" then
+            editBox:SetAttribute("channelTarget", channelTarget)
         end
-        return
-    end
-
-    ChatEdit_ActivateChat(editBox)
+        ns.UpdateEditBoxHeader(editBox)
+    end)
 end
 
 function ns.TrackChannelSend(channelTarget, sourceFrame)

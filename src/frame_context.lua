@@ -133,22 +133,17 @@ local function IsCyclableChatFrame(frame)
     if ns.IsCombatLogFrame(frame) then
         return false
     end
-
-    if type(ns.IsWhisperType) == "function" then
-        if ns.IsWhisperType(frame.chatType) then
-            return true
-        end
-        local editBoxChatType = frame.editBox and frame.editBox:GetAttribute("chatType")
-        if ns.IsWhisperType(editBoxChatType) then
-            return true
-        end
+    if frame.isTemporary then
+        return false
     end
 
-    if type(ns.GetFrameDefaultChatTarget) == "function" then
-        local defaultChatType = ns.GetFrameDefaultChatTarget(frame)
-        if defaultChatType then
-            return true
-        end
+    if ns.IsWhisperType(frame.chatType) then
+        return true
+    end
+
+    local defaultChatType = ns.GetFrameDefaultChatTarget(frame)
+    if defaultChatType then
+        return true
     end
 
     return false
@@ -214,6 +209,9 @@ function ns.SelectAdjacentChatFrame(currentFrame, direction)
     if #chatFrames < 2 then
         return nil
     end
+    local names = {}
+    for _, f in ipairs(chatFrames) do names[#names + 1] = f:GetName() end
+    ns.DebugCycle(names)
     local selectedFrame = ns.GetChatFrameFromTab(currentFrame) or ns.GetSelectedChatFrame()
     local selectedIndex
     for index, frame in ipairs(chatFrames) do
@@ -241,13 +239,14 @@ function ns.SelectAdjacentChatFrame(currentFrame, direction)
     if not nextTab then
         return nil
     end
-    if type(FCF_Tab_OnClick) == "function" then
-        FCF_Tab_OnClick(nextTab)
-    elseif type(nextTab.Click) == "function" then
-        nextTab:Click()
-    else
-        return nil
-    end
+
+    ns.RunOutOfCombat(function()
+        if type(FCF_Tab_OnClick) == "function" then
+            FCF_Tab_OnClick(nextTab)
+        elseif type(nextTab.Click) == "function" then
+            nextTab:Click()
+        end
+    end)
 
     lastSelectedChatFrame = nextFrame
     return nextFrame
