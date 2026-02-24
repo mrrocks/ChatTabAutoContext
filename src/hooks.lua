@@ -106,17 +106,19 @@ local function OnWindowTypeChanged(frame, chatType, chatTarget)
 end
 
 local function OnKeyDown(self, key)
-    self:SetPropagateKeyboardInput(true)
+    self:SetPropagateKeyboardInput(key ~= "ENTER")
     if key ~= "ENTER" then
         return
     end
 
     local selectedFrame = ns.GetSelectedChatFrame()
     if not selectedFrame or not selectedFrame.editBox then
+        self:SetPropagateKeyboardInput(true)
         return
     end
 
     if selectedFrame.editBox:HasFocus() then
+        self:SetPropagateKeyboardInput(true)
         return
     end
 
@@ -165,8 +167,19 @@ end)
 for eventName in pairs(whisperEvents) do
     eventFrame:RegisterEvent(eventName)
 end
+eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 
 eventFrame:SetScript("OnEvent", function(_, event, ...)
+    if event == "PLAYER_REGEN_DISABLED" then
+        eventFrame:EnableKeyboard(false)
+        return
+    end
+    if event == "PLAYER_REGEN_ENABLED" then
+        eventFrame:EnableKeyboard(true)
+        eventFrame:SetPropagateKeyboardInput(true)
+        return
+    end
     if not whisperEvents[event] then
         return
     end
