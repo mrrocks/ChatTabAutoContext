@@ -133,12 +133,12 @@ local function IsCyclableChatFrame(frame)
     if ns.IsCombatLogFrame(frame) then
         return false
     end
-    if frame.isTemporary then
-        return false
-    end
-
     if ns.IsWhisperType(frame.chatType) then
         return true
+    end
+
+    if frame.isTemporary then
+        return false
     end
 
     local defaultChatType = ns.GetFrameDefaultChatTarget(frame)
