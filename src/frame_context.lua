@@ -237,13 +237,13 @@ function ns.SelectAdjacentChatFrame(currentFrame, direction)
         return nil
     end
 
-    ns.RunOutOfCombat(function()
-        if type(FCF_Tab_OnClick) == "function" then
-            FCF_Tab_OnClick(nextTab)
-        elseif type(nextTab.Click) == "function" then
-            nextTab:Click()
-        end
-    end)
+    if type(FCF_Tab_OnClick) == "function" then
+        FCF_Tab_OnClick(nextTab)
+    elseif type(nextTab.Click) == "function" then
+        nextTab:Click()
+    else
+        return nil
+    end
 
     lastSelectedChatFrame = nextFrame
     return nextFrame

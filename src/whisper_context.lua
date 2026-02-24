@@ -126,24 +126,19 @@ function ns.SetWhisperTarget(frame, activateChat)
         return
     end
 
-    selectedFrame.chatTarget = target and target ~= "" and target or selectedFrame.chatTarget
     if target and target ~= "" then
+        editBox:SetAttribute("chatType", whisperType)
+        editBox:SetAttribute("tellTarget", target)
+        selectedFrame.chatTarget = target
         ns.UpdateWhisperState(selectedFrame, whisperType, target)
+        ns.UpdateEditBoxHeader(editBox)
     end
 
-    ns.RunOutOfCombat(function()
-        if target and target ~= "" then
-            editBox:SetAttribute("chatType", whisperType)
-            editBox:SetAttribute("tellTarget", target)
-            ns.UpdateEditBoxHeader(editBox)
+    if activateChat then
+        if not ns.OpenChat("", selectedFrame) then
+            ChatEdit_ActivateChat(editBox)
         end
-
-        if activateChat then
-            if not ns.OpenChat("", selectedFrame) then
-                ChatEdit_ActivateChat(editBox)
-            end
-        end
-    end)
+    end
 end
 
 function ns.ScheduleWhisperTarget(frame, activateChat)

@@ -1,30 +1,5 @@
 local _, ns = ...
 
-local pendingCombatCallbacks = {}
-
-local function FlushCombatCallbacks()
-    local callbacks = pendingCombatCallbacks
-    pendingCombatCallbacks = {}
-    for i = 1, #callbacks do
-        callbacks[i]()
-    end
-end
-
-function ns.RunOutOfCombat(callback)
-    if not InCombatLockdown() then
-        callback()
-        return
-    end
-    pendingCombatCallbacks[#pendingCombatCallbacks + 1] = callback
-end
-
-function ns.HandleCombatDeferEvent(event)
-    if event ~= "PLAYER_REGEN_ENABLED" or #pendingCombatCallbacks == 0 then
-        return
-    end
-    FlushCombatCallbacks()
-end
-
 function ns.OpenChat(text, frame)
     if type(ChatFrame_OpenChat) == "function" then
         ChatFrame_OpenChat(text, frame)

@@ -371,15 +371,26 @@ function ns.OpenFrameContext(selectedFrame)
     end
 
     local editBox = selectedFrame.editBox
-    ns.RunOutOfCombat(function()
-        ChatEdit_ActivateChat(editBox)
-        editBox:SetAttribute("chatType", chatType)
-        editBox:SetAttribute("stickyType", chatType)
-        if chatType == "CHANNEL" then
-            editBox:SetAttribute("channelTarget", channelTarget)
+    editBox:SetAttribute("chatType", chatType)
+    editBox:SetAttribute("stickyType", chatType)
+    if chatType == "CHANNEL" then
+        editBox:SetAttribute("channelTarget", channelTarget)
+    end
+    ns.UpdateEditBoxHeader(editBox)
+
+    if chatType == "CHANNEL" and channelTarget then
+        local channelCommand = "/" .. channelTarget .. " "
+        if not ns.OpenChat(channelCommand, selectedFrame) then
+            ChatEdit_ActivateChat(editBox)
+            editBox:SetText(channelCommand)
         end
-        ns.UpdateEditBoxHeader(editBox)
-    end)
+        if type(ChatEdit_ParseText) == "function" then
+            ChatEdit_ParseText(editBox, 0, true)
+        end
+        return
+    end
+
+    ChatEdit_ActivateChat(editBox)
 end
 
 function ns.TrackChannelSend(channelTarget, sourceFrame)

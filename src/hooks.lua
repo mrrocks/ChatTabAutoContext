@@ -2,16 +2,6 @@ local _, ns = ...
 
 local eventFrame = ns.eventFrame
 local whisperEvents = ns.whisperEvents
-local keyboardPropagationPending = false
-
-local function EnsureKeyboardPropagation()
-    if InCombatLockdown() then
-        keyboardPropagationPending = true
-        return
-    end
-    eventFrame:SetPropagateKeyboardInput(true)
-    keyboardPropagationPending = false
-end
 
 local function HandleEditBoxTabPressed(editBox)
     if not editBox then
@@ -77,10 +67,11 @@ local function HookAllEditBoxTabs()
     end
 end
 
-local function InstallTabHooks()
+local function InstallHooks()
     if not ChatFrame1 or not ChatFrame1.editBox then
         return false
     end
+
     HookAllEditBoxTabs()
 
     hooksecurefunc("ChatEdit_ActivateChat", function(editBox)
@@ -90,12 +81,12 @@ local function InstallTabHooks()
     return true
 end
 
-if not InstallTabHooks() then
+if not InstallHooks() then
     local hookFrame = CreateFrame("Frame")
     hookFrame:RegisterEvent("ADDON_LOADED")
     hookFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     hookFrame:SetScript("OnEvent", function(self)
-        if InstallTabHooks() then
+        if InstallHooks() then
             self:UnregisterAllEvents()
         end
     end)
@@ -114,7 +105,8 @@ local function OnWindowTypeChanged(frame, chatType, chatTarget)
     ns.ScheduleWhisperTarget(frame, false)
 end
 
-local function OnKeyDown(_, key)
+local function OnKeyDown(self, key)
+    self:SetPropagateKeyboardInput(true)
     if key ~= "ENTER" then
         return
     end
@@ -130,16 +122,12 @@ local function OnKeyDown(_, key)
 
     ns.SetLastSelectedChatFrame(selectedFrame)
 
-    ns.RunOutOfCombat(function()
-        if not selectedFrame or not selectedFrame.editBox then
-            return
-        end
-        if ns.IsWhisperType(selectedFrame.chatType) then
-            ns.SetWhisperTarget(selectedFrame, true)
-            return
-        end
-        ns.OpenFrameContext(selectedFrame)
-    end)
+    if ns.IsWhisperType(selectedFrame.chatType) then
+        ns.SetWhisperTarget(selectedFrame, true)
+        return
+    end
+
+    ns.OpenFrameContext(selectedFrame)
 end
 
 ns.HookSecure("SendChatMessage", function(_, chatType, _, channelTarget)
@@ -166,26 +154,6 @@ if not ns.HookSecure("FCF_SetTemporaryWindowType", OnWindowTypeChanged) then
     ns.HookSecure("FCF_SetWindowType", OnWindowTypeChanged)
 end
 
-for eventName in pairs(whisperEvents) do
-    eventFrame:RegisterEvent(eventName)
-end
-
-eventFrame:SetScript("OnEvent", function(_, event, ...)
-    if event == "PLAYER_REGEN_ENABLED" then
-        if keyboardPropagationPending then
-            EnsureKeyboardPropagation()
-        end
-        ns.HandleCombatDeferEvent(event)
-        return
-    end
-    if not whisperEvents[event] then
-        return
-    end
-
-    ns.TrackWhisperEvent(event, ...)
-    ns.ScheduleWhisperTarget(nil, false)
-end)
-
 ns.HookSecure("FCF_Tab_OnClick", function(chatFrame)
     local actualChatFrame = ns.GetChatFrameFromTab(chatFrame)
     if actualChatFrame then
@@ -194,10 +162,19 @@ ns.HookSecure("FCF_Tab_OnClick", function(chatFrame)
     ns.ScheduleWhisperTarget(actualChatFrame, false)
 end)
 
-eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-eventFrame:SetScript("OnKeyDown", OnKeyDown)
+for eventName in pairs(whisperEvents) do
+    eventFrame:RegisterEvent(eventName)
+end
 
-ns.RunOutOfCombat(function()
-    eventFrame:EnableKeyboard(true)
-    EnsureKeyboardPropagation()
+eventFrame:SetScript("OnEvent", function(_, event, ...)
+    if not whisperEvents[event] then
+        return
+    end
+
+    ns.TrackWhisperEvent(event, ...)
+    ns.ScheduleWhisperTarget(nil, false)
 end)
+
+eventFrame:SetScript("OnKeyDown", OnKeyDown)
+eventFrame:EnableKeyboard(true)
+eventFrame:SetPropagateKeyboardInput(true)
