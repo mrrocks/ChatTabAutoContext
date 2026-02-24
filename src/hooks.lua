@@ -93,6 +93,10 @@ if not InstallHooks() then
 end
 
 local function OnWindowTypeChanged(frame, chatType, chatTarget)
+    if frame and frame.editBox then
+        HookEditBoxTab(frame.editBox)
+    end
+
     if not ns.IsWhisperType(chatType) then
         return
     end
@@ -160,8 +164,15 @@ ns.HookSecure("FCF_Tab_OnClick", function(chatFrame)
     local actualChatFrame = ns.GetChatFrameFromTab(chatFrame)
     if actualChatFrame then
         ns.SetLastSelectedChatFrame(actualChatFrame)
+        if actualChatFrame.editBox then
+            HookEditBoxTab(actualChatFrame.editBox)
+        end
     end
     ns.ScheduleWhisperTarget(actualChatFrame, false)
+end)
+
+ns.HookSecure("FCF_OpenTemporaryWindow", function()
+    HookAllEditBoxTabs()
 end)
 
 for eventName in pairs(whisperEvents) do
