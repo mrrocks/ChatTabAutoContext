@@ -1,7 +1,7 @@
 Chat Tabs Auto Context (@project-version@)
 
+- Allow temporary whisper tabs to be included in tab cycling.
+- Restore tab hook reinstallation on window type changes, tab clicks, and temp windows.
 - Disable keyboard capture during combat to avoid SetPropagateKeyboardInput taint.
 - Fix combat lockdown by removing RunOutOfCombat deferral system.
 - Refactor chat tab context handling by removing debug module and diagnostic output. Enhance tab cycling and channel context management, ensuring accurate behavior in instances. Update .pkgmeta for manual changelog reference.
-- Remove debug module and all diagnostic output.
-- Fix taint-safe tab cycling and channel context in instances.
