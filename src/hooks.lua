@@ -3,6 +3,18 @@ local _, ns = ...
 local eventFrame = ns.eventFrame
 local whisperEvents = ns.whisperEvents
 
+local function GetEditBoxMessageText(editBox)
+    if not editBox then
+        return nil
+    end
+    local text = editBox:GetText()
+    if not text or text == "" then
+        return nil
+    end
+    local stripped = text:match("^/%d+%s+(.+)$") or text:match("^/%S+%s+(.+)$")
+    return stripped or text
+end
+
 local function HandleEditBoxTabPressed(editBox)
     if not editBox then
         return false
@@ -13,6 +25,8 @@ local function HandleEditBoxTabPressed(editBox)
         sourceFrame = ns.GetSelectedChatFrame()
     end
 
+    local pendingText = GetEditBoxMessageText(editBox)
+
     local direction = IsShiftKeyDown() and -1 or 1
     local nextFrame = ns.SelectAdjacentChatFrame(sourceFrame, direction)
     if not nextFrame then
@@ -20,11 +34,11 @@ local function HandleEditBoxTabPressed(editBox)
     end
 
     if ns.IsWhisperType(nextFrame.chatType) then
-        ns.SetWhisperTarget(nextFrame, true)
+        ns.SetWhisperTarget(nextFrame, true, pendingText)
         return true
     end
 
-    ns.OpenFrameContext(nextFrame)
+    ns.OpenFrameContext(nextFrame, pendingText)
     return true
 end
 

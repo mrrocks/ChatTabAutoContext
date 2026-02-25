@@ -359,7 +359,7 @@ function ns.GetFrameDefaultChatTarget(frame)
     return nil, nil
 end
 
-function ns.OpenFrameContext(selectedFrame)
+function ns.OpenFrameContext(selectedFrame, pendingText)
     if not selectedFrame or not selectedFrame.editBox then
         return
     end
@@ -380,9 +380,10 @@ function ns.OpenFrameContext(selectedFrame)
 
     if chatType == "CHANNEL" and channelTarget then
         local channelCommand = "/" .. channelTarget .. " "
-        if not ns.OpenChat(channelCommand, selectedFrame) then
+        local fullText = pendingText and (channelCommand .. pendingText) or channelCommand
+        if not ns.OpenChat(fullText, selectedFrame) then
             ChatEdit_ActivateChat(editBox)
-            editBox:SetText(channelCommand)
+            editBox:SetText(fullText)
         end
         if type(ChatEdit_ParseText) == "function" then
             ChatEdit_ParseText(editBox, 0, true)
@@ -391,6 +392,9 @@ function ns.OpenFrameContext(selectedFrame)
     end
 
     ChatEdit_ActivateChat(editBox)
+    if pendingText then
+        editBox:SetText(pendingText)
+    end
 end
 
 function ns.TrackChannelSend(channelTarget, sourceFrame)

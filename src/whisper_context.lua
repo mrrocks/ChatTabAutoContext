@@ -120,7 +120,7 @@ function ns.ResolveWhisperContext(frame)
     return selectedFrame, editBox, whisperType, target
 end
 
-function ns.SetWhisperTarget(frame, activateChat)
+function ns.SetWhisperTarget(frame, activateChat, pendingText)
     local selectedFrame, editBox, whisperType, target = ns.ResolveWhisperContext(frame)
     if not selectedFrame or not editBox or not whisperType then
         return
@@ -135,8 +135,12 @@ function ns.SetWhisperTarget(frame, activateChat)
     end
 
     if activateChat then
-        if not ns.OpenChat("", selectedFrame) then
+        local chatText = pendingText or ""
+        if not ns.OpenChat(chatText, selectedFrame) then
             ChatEdit_ActivateChat(editBox)
+            if pendingText then
+                editBox:SetText(pendingText)
+            end
         end
     end
 end
