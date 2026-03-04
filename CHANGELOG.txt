@@ -1,7 +1,3 @@
 Chat Tabs Auto Context (@project-version@)
 
-- Preserve typed text when cycling tabs with Tab/Shift+Tab.
-- Allow temporary whisper tabs to be included in tab cycling.
-- Restore tab hook reinstallation on window type changes, tab clicks, and temp windows.
-- Disable keyboard capture during combat to avoid SetPropagateKeyboardInput taint.
-- Fix combat lockdown by removing RunOutOfCombat deferral system.
+- Refactor chat target selection logic to prioritize group types and improve channel handling. Update GetEditBoxMessageText to return nil for empty commands and streamline message extraction.
