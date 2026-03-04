@@ -313,18 +313,23 @@ function ns.GetFrameDefaultChatTarget(frame)
         end
     end
 
-    if #channelTargets > 0 and (presentTypes.CHANNEL or not next(presentTypes)) then
+    local hasGroupType = presentTypes.INSTANCE_CHAT
+        or presentTypes.PARTY
+        or presentTypes.RAID
+        or presentTypes.BATTLEGROUND
+
+    if #channelTargets > 0 and not hasGroupType and (presentTypes.CHANNEL or not next(presentTypes)) then
         local preferredChannelTarget = GetPreferredChannelTarget(frame, channelTargets)
         if preferredChannelTarget then
             return "CHANNEL", preferredChannelTarget
         end
         return "SAY", nil
     end
-    if presentTypes.PARTY then
-        return "PARTY", nil
-    end
     if presentTypes.INSTANCE_CHAT then
         return "INSTANCE_CHAT", nil
+    end
+    if presentTypes.PARTY then
+        return "PARTY", nil
     end
     if presentTypes.RAID then
         return "RAID", nil

@@ -11,8 +11,11 @@ local function GetEditBoxMessageText(editBox)
     if not text or text == "" then
         return nil
     end
-    local stripped = text:match("^/%d+%s+(.+)$") or text:match("^/%S+%s+(.+)$")
-    return stripped or text
+    if text:match("^/%S+%s*$") then
+        return nil
+    end
+    local body = text:match("^/%d+%s+(.+)$") or text:match("^/%S+%s+(.+)$")
+    return body or text
 end
 
 local function HandleEditBoxTabPressed(editBox)
