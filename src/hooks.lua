@@ -18,6 +18,28 @@ local function GetEditBoxMessageText(editBox)
     return body or text
 end
 
+local function FindCurrentTargetIndex(editBox, targets)
+    local currentType = editBox:GetAttribute("chatType")
+    local currentChannel = editBox:GetAttribute("channelTarget")
+    for i, target in ipairs(targets) do
+        if target.chatType == currentType then
+            if currentType ~= "CHANNEL" or target.channelTarget == tonumber(currentChannel) then
+                return i
+            end
+        end
+    end
+    return nil
+end
+
+local function ApplyFrameTarget(frame, targets, targetIndex, pendingText)
+    local target = targets[targetIndex]
+    if not target then
+        ns.OpenFrameContext(frame, pendingText)
+        return
+    end
+    ns.SetFrameChatTarget(frame, target.chatType, target.channelTarget, pendingText)
+end
+
 local function HandleEditBoxTabPressed(editBox)
     if not editBox then
         return false
@@ -29,8 +51,23 @@ local function HandleEditBoxTabPressed(editBox)
     end
 
     local pendingText = GetEditBoxMessageText(editBox)
-
     local direction = IsShiftKeyDown() and -1 or 1
+
+    local targets = ns.GetFrameChatTargets(sourceFrame)
+    if #targets > 1 then
+        local currentIndex = FindCurrentTargetIndex(editBox, targets)
+        if currentIndex then
+            local nextIndex = currentIndex + direction
+            if nextIndex >= 1 and nextIndex <= #targets then
+                ApplyFrameTarget(sourceFrame, targets, nextIndex, pendingText)
+                return true
+            end
+        elseif direction == 1 then
+            ApplyFrameTarget(sourceFrame, targets, 1, pendingText)
+            return true
+        end
+    end
+
     local nextFrame = ns.SelectAdjacentChatFrame(sourceFrame, direction)
     if not nextFrame then
         return false
@@ -41,7 +78,13 @@ local function HandleEditBoxTabPressed(editBox)
         return true
     end
 
-    ns.OpenFrameContext(nextFrame, pendingText)
+    local nextTargets = ns.GetFrameChatTargets(nextFrame)
+    if #nextTargets > 0 then
+        local entryIndex = direction == 1 and 1 or #nextTargets
+        ApplyFrameTarget(nextFrame, nextTargets, entryIndex, pendingText)
+    else
+        ns.OpenFrameContext(nextFrame, pendingText)
+    end
     return true
 end
 
@@ -150,7 +193,16 @@ local function OnKeyDown(self, key)
         return
     end
 
-    ns.OpenFrameContext(selectedFrame)
+    local recentTarget = ns.GetFrameRecentTarget(selectedFrame)
+    if recentTarget then
+        ns.SetFrameChatTarget(
+            selectedFrame,
+            recentTarget.chatType,
+            recentTarget.channelTarget
+        )
+    else
+        ns.OpenFrameContext(selectedFrame)
+    end
 end
 
 ns.HookSecure("SendChatMessage", function(_, chatType, _, channelTarget)
@@ -198,6 +250,18 @@ end
 eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 
+local chatMsgEvents = {
+    "CHAT_MSG_SAY", "CHAT_MSG_YELL",
+    "CHAT_MSG_GUILD", "CHAT_MSG_OFFICER",
+    "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER",
+    "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER", "CHAT_MSG_RAID_WARNING",
+    "CHAT_MSG_INSTANCE_CHAT", "CHAT_MSG_INSTANCE_CHAT_LEADER",
+    "CHAT_MSG_CHANNEL",
+}
+for _, eventName in ipairs(chatMsgEvents) do
+    pcall(eventFrame.RegisterEvent, eventFrame, eventName)
+end
+
 eventFrame:SetScript("OnEvent", function(_, event, ...)
     if event == "PLAYER_REGEN_DISABLED" then
         eventFrame:EnableKeyboard(false)
@@ -208,12 +272,15 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         eventFrame:SetPropagateKeyboardInput(true)
         return
     end
-    if not whisperEvents[event] then
+    if whisperEvents[event] then
+        ns.TrackWhisperEvent(event, ...)
+        ns.ScheduleWhisperTarget(nil, false)
         return
     end
-
-    ns.TrackWhisperEvent(event, ...)
-    ns.ScheduleWhisperTarget(nil, false)
+    if strsub(event, 1, 9) == "CHAT_MSG_" then
+        ns.TrackReceivedMessage(event, ...)
+        return
+    end
 end)
 
 eventFrame:SetScript("OnKeyDown", OnKeyDown)

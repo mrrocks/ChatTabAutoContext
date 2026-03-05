@@ -3,6 +3,8 @@ local _, ns = ...
 local lastUsedChannelByFrame = setmetatable({}, { __mode = "k" })
 local lastUsedChannelByFrameId = {}
 local lastUsedChannelTarget
+local receiveCounter = 0
+local lastReceivedOrder = {}
 local frameWindowTypeToChatType = {
     battleground = "BATTLEGROUND",
     guild = "GUILD",
@@ -227,25 +229,7 @@ local function GetMessageTypePresence(...)
     return presentTypes
 end
 
-function ns.GetFrameWindowName(frame)
-    if not frame then
-        return nil
-    end
-    local frameId = frame.GetID and frame:GetID()
-    if frameId and frameId > 0 then
-        return GetChatWindowInfo(frameId)
-    end
-    return nil
-end
-
-function ns.GetFrameDefaultChatTarget(frame)
-    if type(ChatFrame_GetDefaultChatTarget) == "function" then
-        local chatType, channelTarget = ChatFrame_GetDefaultChatTarget(frame)
-        if chatType then
-            return chatType, channelTarget
-        end
-    end
-
+local function GetFrameChannelData(frame)
     local frameId = frame and frame.GetID and frame:GetID()
     local channelList = frame and frame.channelList
     local zoneChannelList = frame and frame.zoneChannelList
@@ -271,6 +255,30 @@ function ns.GetFrameDefaultChatTarget(frame)
             channelTargets = { resolvedChannelTarget }
         end
     end
+
+    return presentTypes, channelTargets
+end
+
+function ns.GetFrameWindowName(frame)
+    if not frame then
+        return nil
+    end
+    local frameId = frame.GetID and frame:GetID()
+    if frameId and frameId > 0 then
+        return GetChatWindowInfo(frameId)
+    end
+    return nil
+end
+
+function ns.GetFrameDefaultChatTarget(frame)
+    if type(ChatFrame_GetDefaultChatTarget) == "function" then
+        local chatType, channelTarget = ChatFrame_GetDefaultChatTarget(frame)
+        if chatType then
+            return chatType, channelTarget
+        end
+    end
+
+    local presentTypes, channelTargets = GetFrameChannelData(frame)
 
     local stickyChannelTarget
     if frame and frame.editBox and frame.editBox:GetAttribute("stickyType") == "CHANNEL" then
@@ -364,18 +372,37 @@ function ns.GetFrameDefaultChatTarget(frame)
     return nil, nil
 end
 
-function ns.OpenFrameContext(selectedFrame, pendingText)
-    if not selectedFrame or not selectedFrame.editBox then
+function ns.GetFrameChatTargets(frame)
+    local targets = {}
+    local recentTarget = ns.GetFrameRecentTarget(frame)
+    local defaultType, defaultChannel = ns.GetFrameDefaultChatTarget(frame)
+
+    if recentTarget then
+        targets[#targets + 1] = recentTarget
+    end
+
+    if defaultType then
+        local isDuplicate = recentTarget
+            and recentTarget.chatType == defaultType
+            and (defaultType ~= "CHANNEL"
+                or recentTarget.channelTarget == defaultChannel)
+        if not isDuplicate then
+            targets[#targets + 1] = {
+                chatType = defaultType,
+                channelTarget = defaultChannel
+            }
+        end
+    end
+
+    return targets
+end
+
+function ns.SetFrameChatTarget(frame, chatType, channelTarget, pendingText)
+    if not frame or not frame.editBox or not chatType then
         return
     end
 
-    ns.SetLastSelectedChatFrame(selectedFrame)
-    local chatType, channelTarget = ns.GetFrameDefaultChatTarget(selectedFrame)
-    if not chatType then
-        return
-    end
-
-    local editBox = selectedFrame.editBox
+    local editBox = frame.editBox
     editBox:SetAttribute("chatType", chatType)
     editBox:SetAttribute("stickyType", chatType)
     if chatType == "CHANNEL" then
@@ -386,7 +413,7 @@ function ns.OpenFrameContext(selectedFrame, pendingText)
     if chatType == "CHANNEL" and channelTarget then
         local channelCommand = "/" .. channelTarget .. " "
         local fullText = pendingText and (channelCommand .. pendingText) or channelCommand
-        if not ns.OpenChat(fullText, selectedFrame) then
+        if not ns.OpenChat(fullText, frame) then
             ChatEdit_ActivateChat(editBox)
             editBox:SetText(fullText)
         end
@@ -400,6 +427,77 @@ function ns.OpenFrameContext(selectedFrame, pendingText)
     if pendingText then
         editBox:SetText(pendingText)
     end
+end
+
+function ns.OpenFrameContext(selectedFrame, pendingText)
+    if not selectedFrame or not selectedFrame.editBox then
+        return
+    end
+
+    ns.SetLastSelectedChatFrame(selectedFrame)
+    local chatType, channelTarget = ns.GetFrameDefaultChatTarget(selectedFrame)
+    if not chatType then
+        return
+    end
+
+    ns.SetFrameChatTarget(selectedFrame, chatType, channelTarget, pendingText)
+end
+
+local trackableReceivedTypes = {
+    SAY = true, YELL = true,
+    GUILD = true, OFFICER = true,
+    PARTY = true, RAID = true,
+    INSTANCE_CHAT = true, BATTLEGROUND = true,
+    CHANNEL = true,
+}
+
+function ns.TrackReceivedMessage(event, ...)
+    local normalizedType = NormalizeMessageType(event)
+    if not normalizedType or not trackableReceivedTypes[normalizedType] then
+        return
+    end
+
+    receiveCounter = receiveCounter + 1
+
+    if normalizedType == "CHANNEL" then
+        local channelTarget = tonumber((select(8, ...)))
+        if channelTarget and channelTarget > 0 then
+            lastReceivedOrder["CHANNEL_" .. channelTarget] = receiveCounter
+        end
+        return
+    end
+
+    lastReceivedOrder[normalizedType] = receiveCounter
+end
+
+function ns.GetFrameRecentTarget(frame)
+    if not frame then
+        return nil
+    end
+
+    local presentTypes, channelTargets = GetFrameChannelData(frame)
+    local bestOrder = 0
+    local bestTarget
+
+    for key, order in pairs(lastReceivedOrder) do
+        if order > bestOrder then
+            local channelId = tonumber(key:match("^CHANNEL_(%d+)$"))
+            if channelId then
+                for _, ct in ipairs(channelTargets) do
+                    if ct == channelId then
+                        bestOrder = order
+                        bestTarget = { chatType = "CHANNEL", channelTarget = channelId }
+                        break
+                    end
+                end
+            elseif presentTypes[key] then
+                bestOrder = order
+                bestTarget = { chatType = key }
+            end
+        end
+    end
+
+    return bestTarget
 end
 
 function ns.TrackChannelSend(channelTarget, sourceFrame)
