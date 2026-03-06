@@ -1,3 +1,0 @@
-Chat Tabs Auto Context (@project-version@)
-
-- Refactor chat target selection logic to prioritize group types and improve channel handling. Update GetEditBoxMessageText to return nil for empty commands and streamline message extraction.

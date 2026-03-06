@@ -16,6 +16,16 @@ local frameWindowTypeToChatType = {
     say = "SAY",
     yell = "YELL"
 }
+local chatTypeToCommandPrefix = {
+    BATTLEGROUND = "/bg ",
+    GUILD = "/g ",
+    INSTANCE_CHAT = "/i ",
+    OFFICER = "/o ",
+    PARTY = "/p ",
+    RAID = "/raid ",
+    SAY = "/s ",
+    YELL = "/y "
+}
 
 local function VisitTableEntries(values, callback)
     if not values then
@@ -271,13 +281,6 @@ function ns.GetFrameWindowName(frame)
 end
 
 function ns.GetFrameDefaultChatTarget(frame)
-    if type(ChatFrame_GetDefaultChatTarget) == "function" then
-        local chatType, channelTarget = ChatFrame_GetDefaultChatTarget(frame)
-        if chatType then
-            return chatType, channelTarget
-        end
-    end
-
     local presentTypes, channelTargets = GetFrameChannelData(frame)
 
     local stickyChannelTarget
@@ -397,28 +400,30 @@ function ns.GetFrameChatTargets(frame)
     return targets
 end
 
+local function GetChatCommandPrefix(chatType, channelTarget)
+    if chatType == "CHANNEL" then
+        return channelTarget and ("/" .. channelTarget .. " ") or nil
+    end
+    return chatTypeToCommandPrefix[chatType]
+end
+
 function ns.SetFrameChatTarget(frame, chatType, channelTarget, pendingText)
     if not frame or not frame.editBox or not chatType then
         return
     end
 
     local editBox = frame.editBox
-    editBox:SetAttribute("chatType", chatType)
-    editBox:SetAttribute("stickyType", chatType)
-    if chatType == "CHANNEL" then
-        editBox:SetAttribute("channelTarget", channelTarget)
-    end
-    ns.UpdateEditBoxHeader(editBox)
-
-    if chatType == "CHANNEL" and channelTarget then
-        local channelCommand = "/" .. channelTarget .. " "
-        local fullText = pendingText and (channelCommand .. pendingText) or channelCommand
+    local commandPrefix = GetChatCommandPrefix(chatType, channelTarget)
+    if commandPrefix then
+        local fullText = pendingText and (commandPrefix .. pendingText) or commandPrefix
         if not ns.OpenChat(fullText, frame) then
             ChatEdit_ActivateChat(editBox)
             editBox:SetText(fullText)
         end
         if type(ChatEdit_ParseText) == "function" then
             ChatEdit_ParseText(editBox, 0, true)
+        else
+            ns.UpdateEditBoxHeader(editBox)
         end
         return
     end
