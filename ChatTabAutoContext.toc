@@ -1,6 +1,6 @@
-## Interface: 120007
+## Interface: 120100, 120007
 ## Title: Chat Tabs Auto Context
 ## Author: mrrocks
 ## Version: @project-version@
-## Notes: Opens chat using the active tab's first available channel or whisper target.
+## Notes: Opens chat on the active tab's own channel or whisper target, and cycles chat tabs with Tab while typing.
 main.lua

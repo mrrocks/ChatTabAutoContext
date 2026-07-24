@@ -32,25 +32,15 @@ local whisperChatTypes = {
     WHISPER = "WHISPER"
 }
 
-local chatTypeAvailability = {
+local chatTypeSendRequirements = {
     GUILD = function()
         return IsInGuild()
-    end,
-    INSTANCE_CHAT = function()
-        return IsInGroup(LE_PARTY_CATEGORY_INSTANCE)
     end,
     OFFICER = function()
         return IsInGuild()
     end,
-    PARTY = function()
-        return IsInGroup(LE_PARTY_CATEGORY_HOME) and not IsInRaid(LE_PARTY_CATEGORY_HOME)
-    end,
-    RAID = function()
-        return IsInRaid(LE_PARTY_CATEGORY_HOME)
-    end,
     RAID_WARNING = function()
-        return IsInRaid(LE_PARTY_CATEGORY_HOME)
-            and (UnitIsGroupLeader("player") or UnitIsGroupAssistant("player"))
+        return UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
     end
 }
 
@@ -58,9 +48,9 @@ local function HasValue(value)
     return value ~= nil and value ~= ""
 end
 
-local function IsChatTypeUsable(chatType)
-    local isAvailable = chatTypeAvailability[chatType]
-    return not isAvailable or isAvailable()
+local function IsChatTypeSendable(chatType)
+    local canSend = chatTypeSendRequirements[chatType]
+    return not canSend or canSend()
 end
 
 local function IsUsableChatFrame(frame)
@@ -209,7 +199,7 @@ end
 
 local function GetFirstMessageType(availableTypes)
     for _, messageType in ipairs(fallbackMessageTypeOrder) do
-        if availableTypes[messageType] and IsChatTypeUsable(messageType) then
+        if availableTypes[messageType] and IsChatTypeSendable(messageType) then
             return messageType
         end
     end
@@ -340,6 +330,15 @@ local function ApplyTarget(editBox, target)
     return true
 end
 
+local function ApplyFrameTarget(frame, editBox)
+    local target = addon.GetDefaultTarget(frame)
+    if not target then
+        return false
+    end
+
+    return ApplyTarget(editBox, target)
+end
+
 function addon.ApplyActiveTabContext(chatFrame)
     local frame = IsUsableChatFrame(chatFrame) and chatFrame or addon.GetActiveChatFrame()
     if not frame then
@@ -351,12 +350,119 @@ function addon.ApplyActiveTabContext(chatFrame)
         return false
     end
 
-    local target = addon.GetDefaultTarget(frame)
-    if not target then
+    return ApplyFrameTarget(frame, editBox)
+end
+
+local function GetChatTab(frame)
+    if type(frame.GetName) ~= "function" then
+        return nil
+    end
+
+    local frameName = frame:GetName()
+    if not frameName then
+        return nil
+    end
+    return _G[frameName .. "Tab"]
+end
+
+local function IsCyclableChatFrame(frame)
+    if not frame or not frame.editBox then
         return false
     end
 
-    return ApplyTarget(editBox, target)
+    local tab = GetChatTab(frame)
+    if not tab or type(tab.IsShown) ~= "function" or not tab:IsShown() then
+        return false
+    end
+
+    return addon.GetDefaultTarget(frame) ~= nil
+end
+
+local function GetCyclableChatFrames()
+    local frames = {}
+    if not GENERAL_CHAT_DOCK or type(FCFDock_GetChatFrames) ~= "function" then
+        return frames
+    end
+
+    local dockedFrames = FCFDock_GetChatFrames(GENERAL_CHAT_DOCK)
+    if type(dockedFrames) ~= "table" then
+        return frames
+    end
+
+    for _, frame in ipairs(dockedFrames) do
+        if IsCyclableChatFrame(frame) then
+            frames[#frames + 1] = frame
+        end
+    end
+
+    return frames
+end
+
+local function SelectChatTab(frame)
+    local tab = GetChatTab(frame)
+    if not tab or type(FCF_Tab_OnClick) ~= "function" then
+        return false
+    end
+
+    FCF_Tab_OnClick(tab)
+    return true
+end
+
+local function FocusFrameInput(editBox, frame)
+    local frameEditBox = GetEditBoxForSend(frame)
+    if not frameEditBox or frameEditBox == editBox then
+        return editBox
+    end
+
+    local pendingText = type(editBox.GetText) == "function" and editBox:GetText() or nil
+    if ChatFrameUtil and type(ChatFrameUtil.ActivateChat) == "function" then
+        ChatFrameUtil.ActivateChat(frameEditBox)
+    end
+    if HasValue(pendingText) and type(frameEditBox.SetText) == "function" then
+        frameEditBox:SetText(pendingText)
+    end
+
+    return frameEditBox
+end
+
+function addon.CycleChatTab(editBox, step)
+    local frames = GetCyclableChatFrames()
+    if #frames < 2 then
+        return false
+    end
+
+    local currentFrame = addon.GetActiveChatFrame()
+    local currentIndex
+    for index, frame in ipairs(frames) do
+        if frame == currentFrame then
+            currentIndex = index
+            break
+        end
+    end
+
+    local nextIndex
+    if currentIndex then
+        nextIndex = (currentIndex - 1 + step) % #frames + 1
+    else
+        nextIndex = step > 0 and 1 or #frames
+    end
+
+    local nextFrame = frames[nextIndex]
+    if nextFrame == currentFrame or not SelectChatTab(nextFrame) then
+        return false
+    end
+
+    ApplyFrameTarget(nextFrame, FocusFrameInput(editBox, nextFrame))
+    return true
+end
+
+local function IsWritingCommand(editBox)
+    if type(editBox.GetText) ~= "function" then
+        return false
+    end
+
+    local text = editBox:GetText()
+    return type(text) == "string" and text:sub(1, 1) == "/"
 end
 
 local function OnOpenChat(text, chatFrame)
@@ -369,19 +475,51 @@ local function OnOpenChat(text, chatFrame)
     addon.ApplyActiveTabContext(chatFrame)
 end
 
-local function InstallHook()
-    if not ChatFrameUtil or type(ChatFrameUtil.OpenChat) ~= "function" then
-        return false
-    end
-    hooksecurefunc(ChatFrameUtil, "OpenChat", OnOpenChat)
-    return true
+local previousCustomTabPressed
+
+local function IsWhisperFrame(frame)
+    return frame ~= nil and whisperChatTypes[frame.chatType] ~= nil
 end
 
-if not InstallHook() then
+local function OnCustomTabPressed(editBox)
+    if previousCustomTabPressed and previousCustomTabPressed(editBox) then
+        return true
+    end
+
+    if not editBox or IsWritingCommand(editBox) then
+        return false
+    end
+
+    if HasExplicitWhisperTarget(editBox) and not IsWhisperFrame(addon.GetActiveChatFrame()) then
+        return false
+    end
+
+    return addon.CycleChatTab(editBox, IsShiftKeyDown() and -1 or 1)
+end
+
+local openChatHooked = false
+local customTabPressedInstalled = false
+
+local function InstallHooks()
+    if not openChatHooked and ChatFrameUtil and type(ChatFrameUtil.OpenChat) == "function" then
+        hooksecurefunc(ChatFrameUtil, "OpenChat", OnOpenChat)
+        openChatHooked = true
+    end
+
+    if not customTabPressedInstalled and type(ChatEdit_CustomTabPressed) == "function" then
+        previousCustomTabPressed = ChatEdit_CustomTabPressed
+        ChatEdit_CustomTabPressed = OnCustomTabPressed
+        customTabPressedInstalled = true
+    end
+
+    return openChatHooked and customTabPressedInstalled
+end
+
+if not InstallHooks() then
     local loader = CreateFrame("Frame")
     loader:RegisterEvent("PLAYER_LOGIN")
     loader:SetScript("OnEvent", function(self)
-        if InstallHook() then
+        if InstallHooks() then
             self:UnregisterAllEvents()
         end
     end)
