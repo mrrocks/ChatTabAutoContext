@@ -1,0 +1,8 @@
+package-as: ChatTabAutoContext
+
+manual-changelog:
+    filename: CHANGELOG.md
+    markup-type: markdown
+
+ignore:
+    - src
