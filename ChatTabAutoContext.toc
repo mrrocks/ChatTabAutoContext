@@ -2,10 +2,5 @@
 ## Title: Chat Tabs Auto Context
 ## Author: mrrocks
 ## Version: @project-version@
-## Notes: Automatically syncs chat input with the active tab and lets you cycle tabs with Tab/Shift+Tab while preserving channel and whisper context.
+## Notes: Opens chat using the active tab's first available channel or whisper target.
 main.lua
-src/chat_api.lua
-src/frame_context.lua
-src/whisper_context.lua
-src/default_target.lua
-src/hooks.lua
