@@ -44,8 +44,29 @@ local chatTypeSendRequirements = {
     end
 }
 
+local sessionOverrides = {}
+
 local function HasValue(value)
     return value ~= nil and value ~= ""
+end
+
+local function NormalizeTargetName(value)
+    if not HasValue(value) then
+        return nil
+    end
+
+    return tostring(value):lower():gsub("[%s%p]", "")
+end
+
+local function NormalizeChannelName(value)
+    if not HasValue(value) then
+        return nil
+    end
+
+    local name = tostring(value)
+        :gsub("^%s*%d+%s*[%.:%-]?%s*", "")
+        :gsub("%s+%-%s+.*$", "")
+    return NormalizeTargetName(name)
 end
 
 local function IsChatTypeSendable(chatType)
@@ -122,15 +143,38 @@ local function GetSortedNumericKeys(source)
     return keys
 end
 
-local function ResolveChannel(candidate)
+local function ResolveChannelInfo(candidate)
     if candidate == nil or type(GetChannelName) ~= "function" then
         return nil
     end
 
     local channelId, channelName = GetChannelName(candidate)
     if channelId and channelId > 0 and HasValue(channelName) then
-        return channelId
+        return channelId, channelName
     end
+    return nil
+end
+
+local function ResolveChannel(candidate)
+    return ResolveChannelInfo(candidate)
+end
+
+local function GetMatchingChannelFromNames(channelNames, normalizedWindowName)
+    if type(channelNames) ~= "table" or not normalizedWindowName then
+        return nil
+    end
+
+    for _, key in ipairs(GetSortedNumericKeys(channelNames)) do
+        local candidate = channelNames[key]
+        local channelId, channelName = ResolveChannelInfo(candidate)
+        if channelId
+            and (NormalizeChannelName(candidate) == normalizedWindowName
+                or NormalizeChannelName(channelName) == normalizedWindowName)
+        then
+            return channelId
+        end
+    end
+
     return nil
 end
 
@@ -142,6 +186,33 @@ local function GetFirstChannelFromNames(channelNames)
     for _, key in ipairs(GetSortedNumericKeys(channelNames)) do
         local channelId = ResolveChannel(channelNames[key])
         if channelId then
+            return channelId
+        end
+    end
+
+    return nil
+end
+
+local function GetMatchingChannel(frame, frameId, windowName)
+    local normalizedWindowName = NormalizeTargetName(windowName)
+    local channelId = GetMatchingChannelFromNames(frame.channelList, normalizedWindowName)
+    if channelId then
+        return channelId
+    end
+
+    if not frameId or type(GetChatWindowChannels) ~= "function" then
+        return nil
+    end
+
+    local configuredChannels = { GetChatWindowChannels(frameId) }
+    for index = 1, #configuredChannels, 2 do
+        local candidate = configuredChannels[index]
+        local channelName
+        channelId, channelName = ResolveChannelInfo(candidate)
+        if channelId
+            and (NormalizeChannelName(candidate) == normalizedWindowName
+                or NormalizeChannelName(channelName) == normalizedWindowName)
+        then
             return channelId
         end
     end
@@ -177,6 +248,62 @@ local function NormalizeMessageType(messageType)
     return sendableChatTypes[messageType] or whisperChatTypes[messageType]
 end
 
+local function IsStickyNonWhisperChatType(chatType)
+    if whisperChatTypes[chatType] then
+        return false
+    end
+
+    local chatTypeInfo = ChatTypeInfo and ChatTypeInfo[chatType]
+    return chatTypeInfo and chatTypeInfo.sticky == 1
+end
+
+local function GetTargetChannelId(target)
+    if not target or target.chatType ~= "CHANNEL" then
+        return nil
+    end
+
+    return ResolveChannel(target.channelName or target.channelId)
+end
+
+local function TargetsMatch(firstTarget, secondTarget)
+    if not firstTarget or not secondTarget or firstTarget.chatType ~= secondTarget.chatType then
+        return false
+    end
+
+    if firstTarget.chatType ~= "CHANNEL" then
+        return true
+    end
+
+    local firstChannelId = GetTargetChannelId(firstTarget)
+    local secondChannelId = GetTargetChannelId(secondTarget)
+    return firstChannelId ~= nil and firstChannelId == secondChannelId
+end
+
+local function GetEditBoxTarget(editBox)
+    if not editBox or type(editBox.GetChatType) ~= "function" then
+        return nil
+    end
+
+    local chatType = editBox:GetChatType()
+    if chatType ~= "CHANNEL" then
+        return HasValue(chatType) and { chatType = chatType } or nil
+    end
+
+    if type(editBox.GetChannelTarget) ~= "function" or type(GetChannelName) ~= "function" then
+        return nil
+    end
+
+    local channelId, channelName = GetChannelName(editBox:GetChannelTarget())
+    if not channelId or channelId <= 0 or not HasValue(channelName) then
+        return nil
+    end
+
+    return {
+        chatType = "CHANNEL",
+        channelName = channelName
+    }
+end
+
 local function AddAvailableMessageTypes(availableTypes, messageTypes)
     for _, key in ipairs(GetSortedNumericKeys(messageTypes)) do
         local chatType = NormalizeMessageType(messageTypes[key])
@@ -205,6 +332,35 @@ local function GetFirstMessageType(availableTypes)
     end
 
     return nil
+end
+
+local function GetMatchingMessageType(availableTypes, windowName)
+    local normalizedWindowName = NormalizeTargetName(windowName)
+    if not normalizedWindowName then
+        return nil
+    end
+
+    for _, messageType in ipairs(fallbackMessageTypeOrder) do
+        local localizedName = _G[messageType]
+        if availableTypes[messageType]
+            and IsChatTypeSendable(messageType)
+            and (NormalizeTargetName(localizedName) == normalizedWindowName
+                or NormalizeTargetName(messageType) == normalizedWindowName)
+        then
+            return messageType
+        end
+    end
+
+    return nil
+end
+
+local function GetFrameWindowName(frameId)
+    if not frameId or type(GetChatWindowInfo) ~= "function" then
+        return nil
+    end
+
+    local windowName = GetChatWindowInfo(frameId)
+    return HasValue(windowName) and windowName or nil
 end
 
 local function GetWhisperTarget(frame)
@@ -262,8 +418,18 @@ function addon.GetDefaultTarget(frame)
     end
 
     local frameId = type(frame.GetID) == "function" and frame:GetID() or nil
+    local windowName = GetFrameWindowName(frameId)
+    local availableMessageTypes = GetAvailableMessageTypes(frame, frameId)
 
-    local channelId = GetFirstChannel(frame, frameId)
+    local chatType = GetMatchingMessageType(availableMessageTypes, windowName)
+    if chatType then
+        return {
+            chatType = chatType
+        }
+    end
+
+    local channelId = GetMatchingChannel(frame, frameId, windowName)
+        or GetFirstChannel(frame, frameId)
     if channelId then
         return {
             chatType = "CHANNEL",
@@ -271,8 +437,7 @@ function addon.GetDefaultTarget(frame)
         }
     end
 
-    local availableMessageTypes = GetAvailableMessageTypes(frame, frameId)
-    local chatType = GetFirstMessageType(availableMessageTypes)
+    chatType = GetFirstMessageType(availableMessageTypes)
     if chatType then
         return {
             chatType = chatType
@@ -330,8 +495,30 @@ local function ApplyTarget(editBox, target)
     return true
 end
 
+local function GetSessionOverrideTarget(frame)
+    local override = sessionOverrides[frame]
+    if not override then
+        return nil
+    end
+
+    if override.chatType ~= "CHANNEL" then
+        return override
+    end
+
+    local channelId = ResolveChannel(override.channelName)
+    if not channelId then
+        sessionOverrides[frame] = nil
+        return nil
+    end
+
+    return {
+        chatType = "CHANNEL",
+        channelId = channelId
+    }
+end
+
 local function ApplyFrameTarget(frame, editBox)
-    local target = addon.GetDefaultTarget(frame)
+    local target = GetSessionOverrideTarget(frame) or addon.GetDefaultTarget(frame)
     if not target then
         return false
     end
@@ -475,6 +662,32 @@ local function OnOpenChat(text, chatFrame)
     addon.ApplyActiveTabContext(chatFrame)
 end
 
+local function OnEditBoxPreSendText(_, editBox)
+    if not editBox or type(editBox.GetText) ~= "function" or not HasValue(editBox:GetText()) then
+        return
+    end
+
+    local frame = addon.GetActiveChatFrame() or GetFrameForEditBox(editBox)
+    if not frame then
+        return
+    end
+
+    local defaultTarget = addon.GetDefaultTarget(frame)
+    local selectedTarget = GetEditBoxTarget(editBox)
+    if not defaultTarget or not selectedTarget or not IsStickyNonWhisperChatType(selectedTarget.chatType) then
+        return
+    end
+
+    if TargetsMatch(selectedTarget, defaultTarget) then
+        sessionOverrides[frame] = nil
+        return
+    end
+
+    if not TargetsMatch(selectedTarget, GetSessionOverrideTarget(frame)) then
+        sessionOverrides[frame] = selectedTarget
+    end
+end
+
 local previousCustomTabPressed
 
 local function IsWhisperFrame(frame)
@@ -499,6 +712,7 @@ end
 
 local openChatHooked = false
 local customTabPressedInstalled = false
+local preSendHooked = false
 
 local function InstallHooks()
     if not openChatHooked and ChatFrameUtil and type(ChatFrameUtil.OpenChat) == "function" then
@@ -512,7 +726,12 @@ local function InstallHooks()
         customTabPressedInstalled = true
     end
 
-    return openChatHooked and customTabPressedInstalled
+    if not preSendHooked and EventRegistry and type(EventRegistry.RegisterCallback) == "function" then
+        EventRegistry:RegisterCallback("ChatFrame.OnEditBoxPreSendText", OnEditBoxPreSendText, addon)
+        preSendHooked = true
+    end
+
+    return openChatHooked and customTabPressedInstalled and preSendHooked
 end
 
 if not InstallHooks() then
