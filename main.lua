@@ -1,5 +1,11 @@
 local _, addon = ...
 
+local issecretvalue = _G.issecretvalue
+
+local function IsSecret(value)
+    return issecretvalue ~= nil and issecretvalue(value)
+end
+
 local sendableChatTypes = {
     EMOTE = "EMOTE",
     GUILD = "GUILD",
@@ -40,7 +46,16 @@ local chatTypeSendRequirements = {
         return IsInGuild()
     end,
     RAID_WARNING = function()
-        return UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
+        local isLeader = UnitIsGroupLeader("player")
+        if IsSecret(isLeader) then
+            return false
+        end
+        if isLeader then
+            return true
+        end
+
+        local isAssistant = UnitIsGroupAssistant("player")
+        return not IsSecret(isAssistant) and isAssistant
     end
 }
 
@@ -50,7 +65,12 @@ end
 
 local function IsChatTypeSendable(chatType)
     local canSend = chatTypeSendRequirements[chatType]
-    return not canSend or canSend()
+    if not canSend then
+        return true
+    end
+
+    local canSendResult = canSend()
+    return not IsSecret(canSendResult) and canSendResult == true
 end
 
 local function IsUsableChatFrame(frame)
@@ -123,11 +143,14 @@ local function GetSortedNumericKeys(source)
 end
 
 local function ResolveChannel(candidate)
-    if candidate == nil or type(GetChannelName) ~= "function" then
+    if IsSecret(candidate) or candidate == nil or type(GetChannelName) ~= "function" then
         return nil
     end
 
     local channelId, channelName = GetChannelName(candidate)
+    if IsSecret(channelId) or IsSecret(channelName) then
+        return nil
+    end
     if channelId and channelId > 0 and HasValue(channelName) then
         return channelId
     end
@@ -171,7 +194,7 @@ local function GetFirstChannel(frame, frameId)
 end
 
 local function NormalizeMessageType(messageType)
-    if type(messageType) ~= "string" then
+    if IsSecret(messageType) or type(messageType) ~= "string" then
         return nil
     end
     return sendableChatTypes[messageType] or whisperChatTypes[messageType]
@@ -207,20 +230,21 @@ local function GetFirstMessageType(availableTypes)
     return nil
 end
 
-local function GetWhisperTarget(frame)
-    local chatType = whisperChatTypes[frame.chatType]
-    if not chatType then
+local function GetWhisperTarget(frame, chatType)
+    local tellTarget = frame.chatTarget
+    if IsSecret(tellTarget) then
         return nil
     end
-
-    local tellTarget = frame.chatTarget
     if not HasValue(tellTarget) and frame.editBox and type(frame.editBox.GetTellTarget) == "function" then
         tellTarget = frame.editBox:GetTellTarget()
+    end
+    if IsSecret(tellTarget) then
+        return nil
     end
     if not HasValue(tellTarget) then
         tellTarget = frame.name
     end
-    if not HasValue(tellTarget) then
+    if IsSecret(tellTarget) or not HasValue(tellTarget) then
         return nil
     end
 
@@ -235,8 +259,8 @@ local function GetLatestWhisperTarget(availableTypes)
         return nil
     end
 
-    local tellTarget, messageType = ChatFrameUtil.GetLastTellTarget()
-    if not HasValue(tellTarget) then
+    local succeeded, tellTarget, messageType = pcall(ChatFrameUtil.GetLastTellTarget)
+    if not succeeded or IsSecret(tellTarget) or IsSecret(messageType) or not HasValue(tellTarget) then
         return nil
     end
 
@@ -256,9 +280,14 @@ function addon.GetDefaultTarget(frame)
         return nil
     end
 
-    local whisperTarget = GetWhisperTarget(frame)
-    if whisperTarget then
-        return whisperTarget
+    local frameChatType = frame.chatType
+    if IsSecret(frameChatType) then
+        return nil
+    end
+
+    local whisperChatType = whisperChatTypes[frameChatType]
+    if whisperChatType then
+        return GetWhisperTarget(frame, whisperChatType)
     end
 
     local frameId = type(frame.GetID) == "function" and frame:GetID() or nil
@@ -288,11 +317,24 @@ local function HasExplicitWhisperTarget(editBox)
     end
 
     local chatType = editBox:GetChatType()
-    if not whisperChatTypes[chatType] or chatType == editBox:GetStickyType() then
+    if IsSecret(chatType) then
+        return true
+    end
+
+    local stickyType = editBox:GetStickyType()
+    if IsSecret(stickyType) then
+        return true
+    end
+    if not whisperChatTypes[chatType] or chatType == stickyType then
         return false
     end
 
-    return type(editBox.GetTellTarget) == "function" and HasValue(editBox:GetTellTarget())
+    if type(editBox.GetTellTarget) ~= "function" then
+        return false
+    end
+
+    local tellTarget = editBox:GetTellTarget()
+    return IsSecret(tellTarget) or HasValue(tellTarget)
 end
 
 local function GetEditBoxForSend(frame)
@@ -365,37 +407,39 @@ local function GetChatTab(frame)
     return _G[frameName .. "Tab"]
 end
 
-local function IsCyclableChatFrame(frame)
-    if not frame or not frame.editBox then
-        return false
-    end
-
-    local tab = GetChatTab(frame)
-    if not tab or type(tab.IsShown) ~= "function" or not tab:IsShown() then
-        return false
-    end
-
-    return addon.GetDefaultTarget(frame) ~= nil
-end
-
-local function GetCyclableChatFrames()
-    local frames = {}
+function addon.GetDockedChatFrames()
     if not GENERAL_CHAT_DOCK or type(FCFDock_GetChatFrames) ~= "function" then
-        return frames
+        return nil
     end
 
     local dockedFrames = FCFDock_GetChatFrames(GENERAL_CHAT_DOCK)
     if type(dockedFrames) ~= "table" then
-        return frames
+        return nil
+    end
+
+    return dockedFrames
+end
+
+local function GetCyclableChatFrames()
+    local frames = {}
+    local targets = {}
+    local dockedFrames = addon.GetDockedChatFrames()
+    if not dockedFrames then
+        return frames, targets
     end
 
     for _, frame in ipairs(dockedFrames) do
-        if IsCyclableChatFrame(frame) then
+        local target = frame
+            and frame.editBox
+            and GetChatTab(frame)
+            and addon.GetDefaultTarget(frame)
+        if target then
             frames[#frames + 1] = frame
+            targets[#targets + 1] = target
         end
     end
 
-    return frames
+    return frames, targets
 end
 
 local function SelectChatTab(frame)
@@ -405,30 +449,33 @@ local function SelectChatTab(frame)
     end
 
     FCF_Tab_OnClick(tab)
+    if GENERAL_CHAT_DOCK
+        and type(FCFDock_GetSelectedWindow) == "function"
+        and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK) ~= frame
+    then
+        return false
+    end
+
+    addon.QueueEllesmereUIChatSync()
     return true
 end
 
-local function FocusFrameInput(editBox, frame)
-    local frameEditBox = GetEditBoxForSend(frame)
-    if not frameEditBox or frameEditBox == editBox then
-        return editBox
+function addon.CycleChatTab(editBox, step)
+    local frames, targets = GetCyclableChatFrames()
+    if #frames < 2 then
+        return false
     end
 
     local pendingText = type(editBox.GetText) == "function" and editBox:GetText() or nil
-    if ChatFrameUtil and type(ChatFrameUtil.ActivateChat) == "function" then
-        ChatFrameUtil.ActivateChat(frameEditBox)
-    end
-    if HasValue(pendingText) and type(frameEditBox.SetText) == "function" then
-        frameEditBox:SetText(pendingText)
-    end
-
-    return frameEditBox
-end
-
-function addon.CycleChatTab(editBox, step)
-    local frames = GetCyclableChatFrames()
-    if #frames < 2 then
+    if IsSecret(pendingText) then
         return false
+    end
+
+    local pendingCursorPosition = type(editBox.GetCursorPosition) == "function"
+        and editBox:GetCursorPosition()
+        or nil
+    if IsSecret(pendingCursorPosition) then
+        pendingCursorPosition = nil
     end
 
     local currentFrame = addon.GetActiveChatFrame()
@@ -452,7 +499,8 @@ function addon.CycleChatTab(editBox, step)
         return false
     end
 
-    ApplyFrameTarget(nextFrame, FocusFrameInput(editBox, nextFrame))
+    local frameEditBox = ChatFrameUtil.OpenChat(pendingText, nextFrame, pendingCursorPosition)
+    ApplyTarget(frameEditBox, targets[nextIndex])
     return true
 end
 
@@ -462,11 +510,14 @@ local function IsWritingCommand(editBox)
     end
 
     local text = editBox:GetText()
+    if IsSecret(text) then
+        return true
+    end
     return type(text) == "string" and text:sub(1, 1) == "/"
 end
 
 local function OnOpenChat(text, chatFrame)
-    if HasValue(text) then
+    if IsSecret(text) or HasValue(text) then
         return
     end
     if chatFrame == nil and CHAT_FOCUS_OVERRIDE then
@@ -478,7 +529,7 @@ end
 local previousCustomTabPressed
 
 local function IsWhisperFrame(frame)
-    return frame ~= nil and whisperChatTypes[frame.chatType] ~= nil
+    return frame ~= nil and (IsSecret(frame.chatType) or whisperChatTypes[frame.chatType] ~= nil)
 end
 
 local function OnCustomTabPressed(editBox)
