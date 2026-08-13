@@ -293,6 +293,12 @@ local function TargetsMatch(firstTarget, secondTarget)
         return false
     end
 
+    if whisperChatTypes[firstTarget.chatType] then
+        local firstName = NormalizeTargetName(firstTarget.tellTarget)
+        local secondName = NormalizeTargetName(secondTarget.tellTarget)
+        return firstName ~= nil and firstName == secondName
+    end
+
     if firstTarget.chatType ~= "CHANNEL" then
         return true
     end
@@ -310,6 +316,21 @@ local function GetEditBoxTarget(editBox)
     local chatType = editBox:GetChatType()
     if IsSecret(chatType) then
         return nil
+    end
+    if whisperChatTypes[chatType] then
+        if type(editBox.GetTellTarget) ~= "function" then
+            return nil
+        end
+
+        local tellTarget = editBox:GetTellTarget()
+        if IsSecret(tellTarget) or not HasValue(tellTarget) then
+            return nil
+        end
+
+        return {
+            chatType = chatType,
+            tellTarget = tellTarget
+        }
     end
     if chatType ~= "CHANNEL" then
         return HasValue(chatType) and { chatType = chatType } or nil
@@ -487,32 +508,6 @@ function addon.GetDefaultTarget(frame)
     return GetLatestWhisperTarget(availableMessageTypes)
 end
 
-local function HasExplicitWhisperTarget(editBox)
-    if type(editBox.GetChatType) ~= "function" or type(editBox.GetStickyType) ~= "function" then
-        return false
-    end
-
-    local chatType = editBox:GetChatType()
-    if IsSecret(chatType) then
-        return true
-    end
-
-    local stickyType = editBox:GetStickyType()
-    if IsSecret(stickyType) then
-        return true
-    end
-    if not whisperChatTypes[chatType] or chatType == stickyType then
-        return false
-    end
-
-    if type(editBox.GetTellTarget) ~= "function" then
-        return false
-    end
-
-    local tellTarget = editBox:GetTellTarget()
-    return IsSecret(tellTarget) or HasValue(tellTarget)
-end
-
 local function GetEditBoxForSend(frame)
     if ChatFrameUtil and type(ChatFrameUtil.ChooseBoxForSend) == "function" then
         local editBox = ChatFrameUtil.ChooseBoxForSend(frame)
@@ -570,6 +565,67 @@ local function GetSessionOverrideTarget(frame)
     }
 end
 
+local function RememberSelectedTarget(frame, selectedTarget)
+    if not frame
+        or not selectedTarget
+        or not (IsStickyNonWhisperChatType(selectedTarget.chatType) or whisperChatTypes[selectedTarget.chatType])
+    then
+        return
+    end
+
+    if not whisperChatTypes[selectedTarget.chatType] or whisperChatTypes[frame.chatType] then
+        local defaultTarget = addon.GetDefaultTarget(frame)
+        if defaultTarget and TargetsMatch(selectedTarget, defaultTarget) then
+            sessionOverrides[frame] = nil
+            return
+        end
+    end
+
+    if not TargetsMatch(selectedTarget, GetSessionOverrideTarget(frame)) then
+        sessionOverrides[frame] = selectedTarget
+    end
+end
+
+local function HasWhisperTellTarget(editBox)
+    if not editBox or type(editBox.GetChatType) ~= "function" or type(editBox.GetStickyType) ~= "function" then
+        return false
+    end
+
+    local chatType = editBox:GetChatType()
+    if IsSecret(chatType) then
+        return true
+    end
+
+    local stickyType = editBox:GetStickyType()
+    if IsSecret(stickyType) then
+        return true
+    end
+    if not whisperChatTypes[chatType] or chatType == stickyType then
+        return false
+    end
+
+    if type(editBox.GetTellTarget) ~= "function" then
+        return false
+    end
+
+    local tellTarget = editBox:GetTellTarget()
+    return IsSecret(tellTarget) or HasValue(tellTarget)
+end
+
+local function HasExplicitWhisperTarget(editBox)
+    if not HasWhisperTellTarget(editBox) then
+        return false
+    end
+
+    local selectedTarget = GetEditBoxTarget(editBox)
+    if not selectedTarget then
+        return true
+    end
+
+    local frame = addon.GetActiveChatFrame() or GetFrameForEditBox(editBox)
+    return not TargetsMatch(GetSessionOverrideTarget(frame), selectedTarget)
+end
+
 local function GetFrameTarget(frame)
     return GetSessionOverrideTarget(frame) or addon.GetDefaultTarget(frame)
 end
@@ -590,7 +646,7 @@ function addon.ApplyActiveTabContext(chatFrame)
     end
 
     local editBox = GetEditBoxForSend(frame)
-    if not editBox or HasExplicitWhisperTarget(editBox) then
+    if not editBox or HasWhisperTellTarget(editBox) then
         return false
     end
 
@@ -725,6 +781,15 @@ local function OnOpenChat(text, chatFrame)
     if chatFrame == nil and CHAT_FOCUS_OVERRIDE then
         return
     end
+
+    local editBox = GetEditBoxForSend(chatFrame)
+    if editBox and editBox.setText == 1 then
+        local pending = editBox.text
+        if IsSecret(pending) or HasValue(pending) then
+            return
+        end
+    end
+
     addon.ApplyActiveTabContext(chatFrame)
 end
 
@@ -743,20 +808,19 @@ local function OnEditBoxPreSendText(_, editBox)
         return
     end
 
-    local defaultTarget = addon.GetDefaultTarget(frame)
-    local selectedTarget = GetEditBoxTarget(editBox)
-    if not defaultTarget or not selectedTarget or not IsStickyNonWhisperChatType(selectedTarget.chatType) then
+    RememberSelectedTarget(frame, GetEditBoxTarget(editBox))
+end
+
+local function RememberWhisperFromTell(chatType, tellTarget, chatFrame)
+    if IsSecret(tellTarget) or not HasValue(tellTarget) then
         return
     end
 
-    if TargetsMatch(selectedTarget, defaultTarget) then
-        sessionOverrides[frame] = nil
-        return
-    end
-
-    if not TargetsMatch(selectedTarget, GetSessionOverrideTarget(frame)) then
-        sessionOverrides[frame] = selectedTarget
-    end
+    local editBox = GetEditBoxForSend(chatFrame)
+    RememberSelectedTarget(addon.GetActiveChatFrame() or GetFrameForEditBox(editBox), {
+        chatType = chatType,
+        tellTarget = tellTarget
+    })
 end
 
 local previousCustomTabPressed
@@ -788,6 +852,16 @@ local preSendHooked = false
 local function InstallHooks()
     if not openChatHooked and ChatFrameUtil and type(ChatFrameUtil.OpenChat) == "function" then
         hooksecurefunc(ChatFrameUtil, "OpenChat", OnOpenChat)
+        if type(ChatFrameUtil.SendTellWithMessage) == "function" then
+            hooksecurefunc(ChatFrameUtil, "SendTellWithMessage", function(name, _, chatFrame)
+                RememberWhisperFromTell("WHISPER", name, chatFrame)
+            end)
+        end
+        if type(ChatFrameUtil.SendBNetTell) == "function" then
+            hooksecurefunc(ChatFrameUtil, "SendBNetTell", function(tokenizedName)
+                RememberWhisperFromTell("BN_WHISPER", tokenizedName)
+            end)
+        end
         openChatHooked = true
     end
 

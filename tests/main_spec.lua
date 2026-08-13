@@ -70,6 +70,10 @@ local function CreateEditBox(frame)
         self.tellTarget = tellTarget
     end
 
+    function editBox:GetChannelTarget()
+        return self.channelId
+    end
+
     function editBox:SetChannelTarget(channelId)
         self.channelId = channelId
     end
@@ -178,11 +182,27 @@ GetChatWindowMessages = function(frameId)
 end
 
 GetChannelName = function(candidate)
-    if candidate == "General" then
+    if candidate == "General" or candidate == 1 then
         return 1, "General"
     end
     return 0, nil
 end
+
+ChatTypeInfo = {
+    CHANNEL = { sticky = 1 },
+    GUILD = { sticky = 1 },
+    SAY = { sticky = 1 },
+    WHISPER = { sticky = 0 },
+    BN_WHISPER = { sticky = 0 }
+}
+
+local eventCallbacks = {}
+
+EventRegistry = {
+    RegisterCallback = function(_, event, callback, owner)
+        eventCallbacks[event] = { callback = callback, owner = owner }
+    end
+}
 
 ChatFrameUtil = {
     GetActiveWindow = function()
@@ -198,10 +218,31 @@ ChatFrameUtil = {
         error("secret tell target")
     end,
     OpenChat = function(text, frame, cursorPosition)
-        activeEditBox = frame.editBox
-        activeEditBox.text = text
-        activeEditBox.cursorPosition = cursorPosition
-        return activeEditBox
+        local editBox = frame and frame.editBox or activeEditBox
+        activeEditBox = editBox
+        if text then
+            editBox.text = text
+            editBox.setText = 1
+        end
+        editBox.cursorPosition = cursorPosition
+        return editBox
+    end,
+    SendTell = function(name, chatFrame)
+        ChatFrameUtil.SendTellWithMessage(name, "", chatFrame)
+    end,
+    SendTellWithMessage = function(name, text, chatFrame)
+        local editBox = ChatFrameUtil.OpenChat(
+            (name and "/w " .. tostring(name) .. " " or ""),
+            chatFrame
+        )
+        editBox.chatType = "WHISPER"
+        editBox.tellTarget = name
+        editBox.text = text
+        activeEditBox = editBox
+    end,
+    SendBNetTell = function(tokenizedName)
+        activeEditBox.chatType = "BN_WHISPER"
+        activeEditBox.tellTarget = tokenizedName
     end
 }
 
@@ -280,3 +321,99 @@ AssertEqual(refreshCount, 1)
 guildFrame.editBox.text = secretValue
 AssertEqual(ChatEdit_CustomTabPressed(guildFrame.editBox), false)
 AssertEqual(selectedFrame, guildFrame)
+
+guildFrame.editBox.text = ""
+FCF_Tab_OnClick(_G[channelFrame.name .. "Tab"])
+AssertEqual(selectedFrame, channelFrame)
+
+local function ResetEditBox(editBox, chatType)
+    editBox.chatType = chatType
+    editBox.stickyType = chatType
+    editBox.tellTarget = nil
+    editBox.channelId = nil
+    editBox.headerUpdated = false
+    editBox.text = ""
+end
+
+ChatFrameUtil.SendTell("PlayerName", channelFrame)
+AssertEqual(addon.ApplyActiveTabContext(channelFrame), false)
+AssertEqual(channelFrame.editBox.chatType, "WHISPER")
+AssertEqual(channelFrame.editBox.tellTarget, "PlayerName")
+
+ChatFrameUtil.OpenChat("", channelFrame)
+AssertEqual(channelFrame.editBox.chatType, "WHISPER")
+AssertEqual(channelFrame.editBox.tellTarget, "PlayerName")
+
+ResetEditBox(channelFrame.editBox, "SAY")
+AssertEqual(addon.ApplyActiveTabContext(channelFrame), true)
+AssertEqual(channelFrame.editBox.chatType, "WHISPER")
+AssertEqual(channelFrame.editBox.tellTarget, "PlayerName")
+AssertEqual(channelFrame.editBox.headerUpdated, true)
+
+channelFrame.editBox.text = "still whispering"
+AssertEqual(ChatEdit_CustomTabPressed(channelFrame.editBox), true)
+AssertEqual(selectedFrame, guildFrame)
+AssertEqual(guildFrame.editBox.chatType, "GUILD")
+AssertEqual(guildFrame.editBox.text, "still whispering")
+
+guildFrame.editBox.text = "back to whisper"
+AssertEqual(addon.CycleChatTab(guildFrame.editBox, -1), true)
+AssertEqual(selectedFrame, channelFrame)
+AssertEqual(channelFrame.editBox.chatType, "WHISPER")
+AssertEqual(channelFrame.editBox.tellTarget, "PlayerName")
+
+ResetEditBox(channelFrame.editBox, "SAY")
+channelFrame.editBox.chatType = "CHANNEL"
+channelFrame.editBox.channelId = 1
+channelFrame.editBox.text = "back on general"
+eventCallbacks["ChatFrame.OnEditBoxPreSendText"].callback(
+    eventCallbacks["ChatFrame.OnEditBoxPreSendText"].owner,
+    channelFrame.editBox
+)
+ResetEditBox(channelFrame.editBox, "SAY")
+AssertEqual(addon.ApplyActiveTabContext(channelFrame), true)
+AssertEqual(channelFrame.editBox.chatType, "CHANNEL")
+AssertEqual(channelFrame.editBox.channelId, 1)
+
+ChatFrameUtil.SendTellWithMessage(secretValue, "", channelFrame)
+ResetEditBox(channelFrame.editBox, "SAY")
+AssertEqual(addon.ApplyActiveTabContext(channelFrame), true)
+AssertEqual(channelFrame.editBox.chatType, "CHANNEL")
+AssertEqual(channelFrame.editBox.channelId, 1)
+
+ResetEditBox(channelFrame.editBox, "SAY")
+ChatFrameUtil.SendBNetTell("BNetFriend")
+ResetEditBox(channelFrame.editBox, "SAY")
+AssertEqual(addon.ApplyActiveTabContext(channelFrame), true)
+AssertEqual(channelFrame.editBox.chatType, "BN_WHISPER")
+AssertEqual(channelFrame.editBox.tellTarget, "BNetFriend")
+
+ResetEditBox(channelFrame.editBox, "SAY")
+channelFrame.editBox.chatType = "WHISPER"
+channelFrame.editBox.tellTarget = "TypedName"
+channelFrame.editBox.text = "typed whisper"
+eventCallbacks["ChatFrame.OnEditBoxPreSendText"].callback(
+    eventCallbacks["ChatFrame.OnEditBoxPreSendText"].owner,
+    channelFrame.editBox
+)
+ResetEditBox(channelFrame.editBox, "SAY")
+AssertEqual(addon.ApplyActiveTabContext(channelFrame), true)
+AssertEqual(channelFrame.editBox.chatType, "WHISPER")
+AssertEqual(channelFrame.editBox.tellTarget, "TypedName")
+
+channelFrame.editBox.tellTarget = "OtherPlayer"
+channelFrame.editBox.stickyType = "SAY"
+channelFrame.editBox.text = "ad hoc whisper"
+AssertEqual(ChatEdit_CustomTabPressed(channelFrame.editBox), false)
+AssertEqual(selectedFrame, channelFrame)
+
+ResetEditBox(channelFrame.editBox, "SAY")
+channelFrame.editBox.chatType = "GUILD"
+channelFrame.editBox.text = "manual guild"
+eventCallbacks["ChatFrame.OnEditBoxPreSendText"].callback(
+    eventCallbacks["ChatFrame.OnEditBoxPreSendText"].owner,
+    channelFrame.editBox
+)
+ResetEditBox(channelFrame.editBox, "SAY")
+AssertEqual(addon.ApplyActiveTabContext(channelFrame), true)
+AssertEqual(channelFrame.editBox.chatType, "GUILD")
