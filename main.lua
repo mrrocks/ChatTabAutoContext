@@ -653,7 +653,7 @@ function addon.ApplyActiveTabContext(chatFrame)
     return ApplyFrameTarget(frame, editBox)
 end
 
-local function GetChatTab(frame)
+function addon.GetChatTab(frame)
     if type(frame.GetName) ~= "function" then
         return nil
     end
@@ -664,6 +664,8 @@ local function GetChatTab(frame)
     end
     return _G[frameName .. "Tab"]
 end
+
+local GetChatTab = addon.GetChatTab
 
 function addon.GetDockedChatFrames()
     if not GENERAL_CHAT_DOCK or type(FCFDock_GetChatFrames) ~= "function" then

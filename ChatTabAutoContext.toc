@@ -2,6 +2,7 @@
 ## Title: Chat Tabs Auto Context
 ## Author: mrrocks
 ## Version: @project-version@
-## Notes: Opens chat on the active tab's own channel or whisper target, and cycles chat tabs with Tab while typing.
+## Notes: Opens chat on the active tab's own channel or whisper target, marks unread tabs, and cycles chat tabs with Tab while typing.
 compatibility/ellesmere.lua
 main.lua
+unread.lua
