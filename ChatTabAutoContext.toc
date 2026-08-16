@@ -1,8 +1,6 @@
 ## Interface: 120100, 120007
-## Title: Chat Tabs Auto Context
+## Title: Chat Improvements
 ## Author: mrrocks
 ## Version: @project-version@
-## Notes: Opens chat on the active tab's own channel or whisper target, marks unread tabs, and cycles chat tabs with Tab while typing.
-compatibility/ellesmere.lua
-main.lua
-unread.lua
+## Notes: Shared parent addon for chat improvement modules.
+## IconTexture: Interface\AddOns\ChatTabAutoContext\icon.png

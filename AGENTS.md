@@ -4,9 +4,8 @@ WoW addon that opens chat on the active tab's channel or whisper target, remembe
 
 ## Layout
 
-- `main.lua` — targeting, session overrides, OpenChat / Tab / SendTell hooks
-- `unread.lua` — unread-message bullets on background chat tabs
-- `compatibility/ellesmere.lua` — sync EllesmereUI Chat 8.8+ tab visuals after a programmatic tab change
+- `modules/tab-selection/` — separately toggleable targeting, session overrides, OpenChat / Tab / SendTell hooks
+- `modules/notifications/` — separately toggleable unread-message addon, including EllesmereUI glow replacement
 - `.pkgmeta` — CurseForge packager config
 - `CHANGELOG.md` — **current release notes only**. Delete older version sections before tagging so CurseForge publishes just this release.
 

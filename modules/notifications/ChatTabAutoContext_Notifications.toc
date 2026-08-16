@@ -1,0 +1,11 @@
+## Interface: 120100, 120007
+## Title: Notifications
+## Group: ChatTabAutoContext
+## Notes: Marks background chat tabs for relevant incoming guild, group, whisper, and yell messages.
+## Author: mrrocks
+## Version: @project-version@
+## Dependencies: ChatTabAutoContext
+## DefaultState: enabled
+## IconTexture: Interface\AddOns\ChatTabAutoContext\icon.png
+ellesmere.lua
+unread.lua

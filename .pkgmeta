@@ -1,5 +1,9 @@
 package-as: ChatTabAutoContext
 
+move-folders:
+    ChatTabAutoContext/modules/notifications: ChatTabAutoContext_Notifications
+    ChatTabAutoContext/modules/tab-selection: ChatTabAutoContext_TabSelection
+
 manual-changelog:
     filename: CHANGELOG.md
     markup-type: markdown

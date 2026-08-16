@@ -1,0 +1,11 @@
+## Interface: 120100, 120007
+## Title: Tab Selection
+## Group: ChatTabAutoContext
+## Notes: Opens chat on the active tab's target and cycles docked chat tabs while typing.
+## Author: mrrocks
+## Version: @project-version@
+## Dependencies: ChatTabAutoContext
+## DefaultState: enabled
+## IconTexture: Interface\AddOns\ChatTabAutoContext\icon.png
+ellesmere.lua
+main.lua

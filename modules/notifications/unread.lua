@@ -1,5 +1,20 @@
 local _, addon = ...
 
+local relevantChatEvents = {
+    CHAT_MSG_BN_WHISPER = true,
+    CHAT_MSG_GUILD = true,
+    CHAT_MSG_INSTANCE_CHAT = true,
+    CHAT_MSG_INSTANCE_CHAT_LEADER = true,
+    CHAT_MSG_OFFICER = true,
+    CHAT_MSG_PARTY = true,
+    CHAT_MSG_PARTY_LEADER = true,
+    CHAT_MSG_RAID = true,
+    CHAT_MSG_RAID_LEADER = true,
+    CHAT_MSG_RAID_WARNING = true,
+    CHAT_MSG_WHISPER = true,
+    CHAT_MSG_YELL = true
+}
+
 local unreadFrames = {}
 local tabBullets = {}
 local hookedFrames = {}
@@ -14,6 +29,18 @@ local function IsChatFrameSelected(frame)
     end
 
     return frame:IsShown()
+end
+
+local function GetChatTab(frame)
+    if type(frame.GetName) ~= "function" then
+        return nil
+    end
+
+    local frameName = frame:GetName()
+    if not frameName then
+        return nil
+    end
+    return _G[frameName .. "Tab"]
 end
 
 local function GetTabBullet(frame)
@@ -45,7 +72,7 @@ end
 
 local function RefreshTabBullet(frame)
     local bullet = tabBullets[frame]
-    local tab = addon.GetChatTab(frame)
+    local tab = GetChatTab(frame)
     if not unreadFrames[frame] or not tab or not tab:IsVisible() then
         if bullet then
             bullet:Hide()
@@ -111,17 +138,21 @@ function addon.MarkChatFrameUnread(frame)
     MarkUnread(frame, true)
 end
 
+local function OnChatFrameMessage(frame, _, _, _, _, _, _, _, event)
+    if relevantChatEvents[event] then
+        MarkUnread(frame)
+    end
+end
+
 local function HookChatFrame(frame)
     if not frame or hookedFrames[frame] or type(frame.AddMessage) ~= "function" then
         return
     end
 
-    hooksecurefunc(frame, "AddMessage", function()
-        MarkUnread(frame)
-    end)
+    hooksecurefunc(frame, "AddMessage", OnChatFrameMessage)
     hookedFrames[frame] = true
 
-    local tab = addon.GetChatTab(frame)
+    local tab = GetChatTab(frame)
     if tab and tab.alerting then
         MarkUnread(frame)
     end
