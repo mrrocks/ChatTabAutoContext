@@ -19,6 +19,7 @@ local unreadFrames = {}
 local tabBullets = {}
 local hookedFrames = {}
 local unreadWatcher = CreateFrame("Frame")
+local discoveryQueued = false
 
 local function IsChatFrameSelected(frame)
     if frame.isDocked
@@ -125,6 +126,7 @@ local function MarkUnread(frame, force)
         return
     end
     if unreadFrames[frame] then
+        RefreshTabBullet(frame)
         return
     end
 
@@ -167,14 +169,32 @@ local function DiscoverChatFrames()
     RefreshTabBullets()
 end
 
-local function OnEvent(_, event)
-    if event == "CHAT_MSG_WHISPER" or event == "CHAT_MSG_BN_WHISPER" then
-        addon.QueueEllesmereUIChatGlowHooks()
+local function QueueChatFrameDiscovery()
+    if discoveryQueued or not C_Timer then
         return
     end
 
+    discoveryQueued = true
+    C_Timer.After(0, function()
+        DiscoverChatFrames()
+        C_Timer.After(0, function()
+            discoveryQueued = false
+            DiscoverChatFrames()
+        end)
+    end)
+end
+
+local function OnEvent(_, event)
     DiscoverChatFrames()
     addon.QueueEllesmereUIChatGlowHooks()
+
+    if event == "CHAT_MSG_WHISPER" or event == "CHAT_MSG_BN_WHISPER" then
+        QueueChatFrameDiscovery()
+    end
+end
+
+if type(FCF_OpenTemporaryWindow) == "function" then
+    hooksecurefunc("FCF_OpenTemporaryWindow", DiscoverChatFrames)
 end
 
 local loader = CreateFrame("Frame")
