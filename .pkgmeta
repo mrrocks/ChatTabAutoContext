@@ -9,4 +9,6 @@ manual-changelog:
     markup-type: markdown
 
 ignore:
+    - AGENTS.md
+    - Scripts
     - src

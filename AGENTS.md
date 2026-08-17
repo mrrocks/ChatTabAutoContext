@@ -6,16 +6,9 @@ WoW addon that opens chat on the active tab's channel or whisper target, remembe
 
 - `modules/tab-selection/` — separately toggleable targeting, session overrides, OpenChat / Tab / SendTell hooks
 - `modules/notifications/` — separately toggleable unread-message addon, including EllesmereUI glow replacement
+- `Scripts/Generate-Release-Changelog.ps1` — builds the current release notes from commit subjects
 - `.pkgmeta` — CurseForge packager config
-- `CHANGELOG.md` — **current release notes only**. Delete older version sections before tagging so CurseForge publishes just this release.
-
-## Code
-
-- Modern Lua. No inline or block comments. Self-descriptive names.
-- Treat `issecretvalue` results as opaque. Never compare, concatenate, or pass secret whisper names, channel names, or group-permission results into `SetTellTarget` / `UpdateHeader`.
-- Do not overwrite an in-progress whisper (`HasWhisperTellTarget`) with the tab's channel default. Name clicks go through `ChatFrameUtil.SendTellWithMessage`.
-- Session overrides live until reload. Sticky channel changes and clicked/typed whispers are remembered per tab. Sending on the tab's default target clears the override.
-- EllesmereUI keeps Blizzard frames as the data plane (hyperlink hit-zones, edit box). After `FCF_Tab_OnClick`, call `addon.QueueEllesmereUIChatSync()`. Do not drive EllesmereUI private state.
+- `CHANGELOG.md` — generated current release notes only
 
 ## Releases
 
@@ -23,13 +16,28 @@ CurseForge automatic packaging is already configured via a GitHub webhook. A Git
 
 Untagged pushes to `main` package as **alpha**. A **release** is created only when the webhook sees a tagged commit.
 
-1. Update `CHANGELOG.md` to the new version only.
-2. Commit on `main`.
-3. Create an annotated tag named like `1.3.0` (no `v` prefix, no `alpha`/`beta` in the name):
+Release changelogs are generated from commit subjects. Write subjects for players, describing the visible outcome in clear, concise language.
+
+- Use an imperative, sentence-case summary without a conventional-commit prefix for user-visible changes.
+- Prefer a specific outcome, such as `Keep chat targeting available during combat`, over an implementation detail such as `Refactor restriction checks`.
+- Keep one user-facing outcome per commit where practical.
+- Put implementation details in the commit body; only the subject is included in release notes.
+- Add `[skip changelog]` to the subject or body for documentation, tests, CI, release tooling, formatting, or internal-only refactors.
+- Do not skip fixes, performance improvements, or behavior changes that players should know about.
+
+To publish a release:
+
+1. Commit all release changes on `main`.
+2. Generate `CHANGELOG.md`, replacing `1.3.0` with the new version:
+
+   `./Scripts/Generate-Release-Changelog.ps1 -Version 1.3.0`
+
+3. Commit the generated changelog with `[skip changelog]` in the commit message.
+4. Create an annotated tag named like `1.3.0` (no `v` prefix, no `alpha`/`beta` in the name):
 
    `git tag -a 1.3.0 -m "ChatTabAutoContext 1.3.0"`
 
-4. Push **the tag only** (this also pushes the commit):
+5. Push **the tag only** (this also pushes the commit):
 
    `git push origin 1.3.0`
 
