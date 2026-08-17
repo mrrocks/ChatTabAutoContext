@@ -61,8 +61,48 @@ local chatTypeSendRequirements = {
 
 local sessionOverrides = {}
 
+local chatInputRestrictionTypes = {}
+if Enum and Enum.AddOnRestrictionType then
+    local restrictionTypeNames = {
+        "Encounter",
+        "ChallengeMode",
+        "PvPMatch",
+        "Chat"
+    }
+    for _, name in ipairs(restrictionTypeNames) do
+        local restrictionType = Enum.AddOnRestrictionType[name]
+        if restrictionType ~= nil then
+            chatInputRestrictionTypes[#chatInputRestrictionTypes + 1] = restrictionType
+        end
+    end
+end
+
 local function HasValue(value)
     return value ~= nil and value ~= ""
+end
+
+local function IsChatInputRestricted()
+    if not C_RestrictedActions
+        or type(C_RestrictedActions.GetAddOnRestrictionState) ~= "function"
+        or not Enum
+        or not Enum.AddOnRestrictionState
+    then
+        return false
+    end
+
+    local inactiveState = Enum.AddOnRestrictionState.Inactive
+    if inactiveState == nil then
+        return false
+    end
+
+    for _, restrictionType in ipairs(chatInputRestrictionTypes) do
+        local state = C_RestrictedActions.GetAddOnRestrictionState(restrictionType)
+        if IsSecret(state) or state ~= inactiveState then
+            return true
+        end
+    end
+
+    return false
 end
 
 local function NormalizeTargetName(value)
@@ -721,6 +761,10 @@ local function SelectChatTab(frame)
 end
 
 function addon.CycleChatTab(editBox, step)
+    if IsChatInputRestricted() then
+        return false
+    end
+
     local frames, targets = GetCyclableChatFrames()
     if #frames < 2 then
         return false
