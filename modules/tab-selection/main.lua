@@ -1,9 +1,11 @@
 local _, addon = ...
 
 local issecretvalue = _G.issecretvalue
+local canaccessvalue = _G.canaccessvalue
 
 local function IsSecret(value)
-    return issecretvalue ~= nil and issecretvalue(value)
+    return (canaccessvalue ~= nil and not canaccessvalue(value))
+        or (issecretvalue ~= nil and issecretvalue(value))
 end
 
 local sendableChatTypes = {
@@ -36,6 +38,12 @@ local fallbackMessageTypeOrder = {
 local whisperChatTypes = {
     BN_WHISPER = "BN_WHISPER",
     WHISPER = "WHISPER"
+}
+
+-- Tokenized Battle.net names can make Blizzard's private chat-history state
+-- inaccessible after addon code writes them back into chat edit-box attributes.
+local supportedWhisperChatTypes = {
+    WHISPER = true
 }
 
 local chatTypeSendRequirements = {
@@ -358,6 +366,9 @@ local function GetEditBoxTarget(editBox)
         return nil
     end
     if whisperChatTypes[chatType] then
+        if not supportedWhisperChatTypes[chatType] then
+            return nil
+        end
         if type(editBox.GetTellTarget) ~= "function" then
             return nil
         end
@@ -459,6 +470,10 @@ local function GetFrameWindowName(frameId)
 end
 
 local function GetWhisperTarget(frame, chatType)
+    if not supportedWhisperChatTypes[chatType] then
+        return nil
+    end
+
     local tellTarget = frame.chatTarget
     if IsSecret(tellTarget) then
         return nil
@@ -493,7 +508,7 @@ local function GetLatestWhisperTarget(availableTypes)
     end
 
     local chatType = whisperChatTypes[messageType]
-    if not chatType or not availableTypes[chatType] then
+    if not supportedWhisperChatTypes[chatType] or not availableTypes[chatType] then
         return nil
     end
 
@@ -560,6 +575,7 @@ end
 
 local function ApplyTarget(editBox, target)
     if not editBox
+        or (whisperChatTypes[target.chatType] and not supportedWhisperChatTypes[target.chatType])
         or type(editBox.SetChatType) ~= "function"
         or type(editBox.UpdateHeader) ~= "function"
     then
@@ -608,7 +624,8 @@ end
 local function RememberSelectedTarget(frame, selectedTarget)
     if not frame
         or not selectedTarget
-        or not (IsStickyNonWhisperChatType(selectedTarget.chatType) or whisperChatTypes[selectedTarget.chatType])
+        or not (IsStickyNonWhisperChatType(selectedTarget.chatType)
+            or supportedWhisperChatTypes[selectedTarget.chatType])
     then
         return
     end
@@ -901,11 +918,6 @@ local function InstallHooks()
         if type(ChatFrameUtil.SendTellWithMessage) == "function" then
             hooksecurefunc(ChatFrameUtil, "SendTellWithMessage", function(name, _, chatFrame)
                 RememberWhisperFromTell("WHISPER", name, chatFrame)
-            end)
-        end
-        if type(ChatFrameUtil.SendBNetTell) == "function" then
-            hooksecurefunc(ChatFrameUtil, "SendBNetTell", function(tokenizedName)
-                RememberWhisperFromTell("BN_WHISPER", tokenizedName)
             end)
         end
         openChatHooked = true
