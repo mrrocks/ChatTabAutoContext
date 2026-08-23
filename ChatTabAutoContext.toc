@@ -1,4 +1,4 @@
-## Interface: 120100, 120007
+## Interface: 120100
 ## Title: Chat Improvements
 ## Author: mrrocks
 ## Version: @project-version@
