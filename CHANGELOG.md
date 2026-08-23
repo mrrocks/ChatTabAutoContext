@@ -1,5 +1,5 @@
 # Changelog
 
-## 1.5.3
+## 1.5.4
 
-- Prevent Battle.net whisper history errors
+- Drop obsolete 12.0.7 parent-addon compatibility
