@@ -2,6 +2,7 @@ local _, addon = ...
 
 local issecretvalue = _G.issecretvalue
 local canaccessvalue = _G.canaccessvalue
+local securecallfunction = _G.securecallfunction
 
 local function IsSecret(value)
     return (canaccessvalue ~= nil and not canaccessvalue(value))
@@ -38,12 +39,6 @@ local fallbackMessageTypeOrder = {
 local whisperChatTypes = {
     BN_WHISPER = "BN_WHISPER",
     WHISPER = "WHISPER"
-}
-
--- Tokenized Battle.net names can make Blizzard's private chat-history state
--- inaccessible after addon code writes them back into chat edit-box attributes.
-local supportedWhisperChatTypes = {
-    WHISPER = true
 }
 
 local chatTypeSendRequirements = {
@@ -169,16 +164,21 @@ local function GetActiveEditBox()
     return nil
 end
 
+local function GetSelectedDockedChatFrame()
+    if GENERAL_CHAT_DOCK and type(FCFDock_GetSelectedWindow) == "function" then
+        return FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
+    end
+    return nil
+end
+
 function addon.GetActiveChatFrame()
     if IsUsableChatFrame(SELECTED_CHAT_FRAME) then
         return SELECTED_CHAT_FRAME
     end
 
-    if GENERAL_CHAT_DOCK and type(FCFDock_GetSelectedWindow) == "function" then
-        local selectedFrame = FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
-        if IsUsableChatFrame(selectedFrame) then
-            return selectedFrame
-        end
+    local selectedFrame = GetSelectedDockedChatFrame()
+    if IsUsableChatFrame(selectedFrame) then
+        return selectedFrame
     end
 
     if IsUsableChatFrame(SELECTED_DOCK_FRAME) then
@@ -366,9 +366,6 @@ local function GetEditBoxTarget(editBox)
         return nil
     end
     if whisperChatTypes[chatType] then
-        if not supportedWhisperChatTypes[chatType] then
-            return nil
-        end
         if type(editBox.GetTellTarget) ~= "function" then
             return nil
         end
@@ -470,10 +467,6 @@ local function GetFrameWindowName(frameId)
 end
 
 local function GetWhisperTarget(frame, chatType)
-    if not supportedWhisperChatTypes[chatType] then
-        return nil
-    end
-
     local tellTarget = frame.chatTarget
     if IsSecret(tellTarget) then
         return nil
@@ -508,7 +501,7 @@ local function GetLatestWhisperTarget(availableTypes)
     end
 
     local chatType = whisperChatTypes[messageType]
-    if not supportedWhisperChatTypes[chatType] or not availableTypes[chatType] then
+    if not chatType or not availableTypes[chatType] then
         return nil
     end
 
@@ -575,7 +568,6 @@ end
 
 local function ApplyTarget(editBox, target)
     if not editBox
-        or (whisperChatTypes[target.chatType] and not supportedWhisperChatTypes[target.chatType])
         or type(editBox.SetChatType) ~= "function"
         or type(editBox.UpdateHeader) ~= "function"
     then
@@ -625,7 +617,7 @@ local function RememberSelectedTarget(frame, selectedTarget)
     if not frame
         or not selectedTarget
         or not (IsStickyNonWhisperChatType(selectedTarget.chatType)
-            or supportedWhisperChatTypes[selectedTarget.chatType])
+            or whisperChatTypes[selectedTarget.chatType])
     then
         return
     end
@@ -761,11 +753,17 @@ end
 
 local function SelectChatTab(frame)
     local tab = GetChatTab(frame)
-    if not tab or type(FCF_Tab_OnClick) ~= "function" then
+    if not tab
+        or type(FCF_Tab_OnClick) ~= "function"
+        or type(securecallfunction) ~= "function"
+    then
         return false
     end
 
-    FCF_Tab_OnClick(tab)
+    -- Blizzard invokes ChatEdit_CustomTabPressed through securecall, but addon
+    -- functions still run tainted. Re-enter Blizzard's native security context
+    -- before its tab handler writes SELECTED_CHAT_FRAME and dock selection state.
+    securecallfunction(FCF_Tab_OnClick, tab, "LeftButton")
     if GENERAL_CHAT_DOCK
         and type(FCFDock_GetSelectedWindow) == "function"
         and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK) ~= frame
@@ -799,7 +797,11 @@ function addon.CycleChatTab(editBox, step)
         pendingCursorPosition = nil
     end
 
-    local currentFrame = addon.GetActiveChatFrame()
+    -- Dock selection changes before Blizzard applies the corresponding
+    -- show/hide update. Use that selection directly so repeated keypresses in
+    -- the same frame continue from the newest tab instead of the last visible
+    -- one.
+    local currentFrame = GetSelectedDockedChatFrame() or addon.GetActiveChatFrame()
     local currentIndex
     for index, frame in ipairs(frames) do
         if frame == currentFrame then
@@ -820,7 +822,13 @@ function addon.CycleChatTab(editBox, step)
         return false
     end
 
-    local frameEditBox = ChatFrameUtil.OpenChat(pendingText, nextFrame, pendingCursorPosition)
+    -- Classic chat (and EllesmereUI Chat) shares one edit box across docked
+    -- frames. The draft is already there, so reopening it can make the visual
+    -- tab advance while the message view remains on the previous frame.
+    local frameEditBox = GetEditBoxForSend(nextFrame)
+    if frameEditBox ~= editBox then
+        frameEditBox = ChatFrameUtil.OpenChat(pendingText, nextFrame, pendingCursorPosition)
+    end
     ApplyTarget(frameEditBox, targets[nextIndex])
     return true
 end
@@ -901,7 +909,8 @@ local function OnCustomTabPressed(editBox)
         return false
     end
 
-    if HasExplicitWhisperTarget(editBox) and not IsWhisperFrame(addon.GetActiveChatFrame()) then
+    local selectedFrame = GetSelectedDockedChatFrame() or addon.GetActiveChatFrame()
+    if HasExplicitWhisperTarget(editBox) and not IsWhisperFrame(selectedFrame) then
         return false
     end
 
@@ -918,6 +927,11 @@ local function InstallHooks()
         if type(ChatFrameUtil.SendTellWithMessage) == "function" then
             hooksecurefunc(ChatFrameUtil, "SendTellWithMessage", function(name, _, chatFrame)
                 RememberWhisperFromTell("WHISPER", name, chatFrame)
+            end)
+        end
+        if type(ChatFrameUtil.SendBNetTell) == "function" then
+            hooksecurefunc(ChatFrameUtil, "SendBNetTell", function(tokenizedName)
+                RememberWhisperFromTell("BN_WHISPER", tokenizedName)
             end)
         end
         openChatHooked = true

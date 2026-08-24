@@ -10,6 +10,10 @@ WoW addon that opens chat on the active tab's channel or whisper target, remembe
 - `.pkgmeta` — CurseForge packager config
 - `CHANGELOG.md` — generated current release notes only
 
+## Taint safety
+
+Blizzard exposes `ChatEdit_CustomTabPressed` for addon hooks and invokes it through `securecall`. Calls from that hook into Blizzard tab-selection code must use `securecallfunction`; a direct `FCF_Tab_OnClick` / `FCFDock_SelectWindow` call taints the dock state and can break Battle.net whisper history when private values are processed.
+
 ## Releases
 
 CurseForge automatic packaging is already configured via a GitHub webhook. A GitHub Release is not required and does not trigger packaging.
