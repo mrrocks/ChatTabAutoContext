@@ -41,8 +41,15 @@ To publish a release:
 
    `git tag -a 1.3.0 -m "ChatTabAutoContext 1.3.0"`
 
-5. Push **the tag only** (this also pushes the commit):
+5. Push **the tag first** (this also pushes the commit and lets CurseForge see the release tag):
 
    `git push origin 1.3.0`
 
-Do not `git push origin main` first. That webhook fires on an untagged commit and publishes an alpha. If that happens, delete the remote tag and push the same tag again so CurseForge sees a tagged release.
+6. Confirm that CurseForge created the tagged release.
+7. Keep `origin/main` synchronized only after confirming that the CurseForge project has **Package all commits** disabled, then push `main`:
+
+   `git push origin main`
+
+GitHub sends branch and tag updates as separate push events, even when both refs are supplied to one `git push` command. A `main` push does not create a second tagged release, but with **Package all commits** enabled CurseForge can package it as an additional alpha. Do not assume CurseForge will deduplicate a branch push whose commit was already packaged from a tag. If the setting cannot be verified as disabled, stop after the tag push and report that `origin/main` remains behind instead of risking an extra package.
+
+Never push `main` before the release tag. If that happens while **Package all commits** is enabled, CurseForge can publish the commit as an alpha before it sees the release tag.
