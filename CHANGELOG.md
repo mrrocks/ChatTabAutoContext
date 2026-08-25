@@ -1,5 +1,5 @@
 # Changelog
 
-## 1.5.5
+## 1.5.6
 
-- Keep tab cycling synchronized with Battle.net whispers
+- Keep rapid tab cycling synchronized without breaking whispers
