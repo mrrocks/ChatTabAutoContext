@@ -96,5 +96,7 @@ if ($outputDirectory -and -not (Test-Path -LiteralPath $outputDirectory)) {
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 }
 
-Set-Content -LiteralPath $resolvedOutput -Value $lines -Encoding utf8NoBOM
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$content = ($lines -join [Environment]::NewLine) + [Environment]::NewLine
+[IO.File]::WriteAllText($resolvedOutput, $content, $utf8NoBom)
 Write-Host "Generated $resolvedOutput from $range with $($notes.Count) release note(s)."
