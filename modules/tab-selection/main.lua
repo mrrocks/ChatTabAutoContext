@@ -574,6 +574,13 @@ local function ApplyTarget(editBox, target)
         return false
     end
 
+    -- Temporary whisper windows already carry Blizzard's native target. Avoid
+    -- rewriting the edit-box attributes when the requested context is already
+    -- active, particularly for private whisper values.
+    if TargetsMatch(GetEditBoxTarget(editBox), target) then
+        return true
+    end
+
     if target.chatType == "CHANNEL" then
         if type(editBox.SetChannelTarget) ~= "function" then
             return false
@@ -676,6 +683,10 @@ local function HasExplicitWhisperTarget(editBox)
 end
 
 local function GetFrameTarget(frame)
+    if frame and not IsSecret(frame.chatType) and whisperChatTypes[frame.chatType] then
+        return addon.GetDefaultTarget(frame)
+    end
+
     return GetSessionOverrideTarget(frame) or addon.GetDefaultTarget(frame)
 end
 
@@ -763,7 +774,9 @@ local function SelectChatTab(frame)
     -- Blizzard invokes ChatEdit_CustomTabPressed through securecall, but addon
     -- functions still run tainted. Re-enter Blizzard's native security context
     -- before its tab handler writes SELECTED_CHAT_FRAME and dock selection state.
-    securecallfunction(FCF_Tab_OnClick, tab, "LeftButton")
+    -- Nil follows the native left-click path. Do not pass an addon-origin
+    -- button string into Blizzard's secured dock-state update.
+    securecallfunction(FCF_Tab_OnClick, tab)
     if GENERAL_CHAT_DOCK
         and type(FCFDock_GetSelectedWindow) == "function"
         and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK) ~= frame
