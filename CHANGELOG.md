@@ -1,5 +1,5 @@
 # Changelog
 
-## 1.6.1
+## 1.6.2
 
-- Prevent EllesmereUI tab clicks from breaking whispers
+- Remember per-tab chat targets after sending
