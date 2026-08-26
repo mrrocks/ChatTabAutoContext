@@ -20,6 +20,8 @@ CurseForge automatic packaging is already configured via a GitHub webhook. A Git
 
 Untagged pushes to `main` package as **alpha**. A **release** is created only when the webhook sees a tagged commit.
 
+Unless otherwise specified, create the next release by incrementing the patch version only (for example, `1.3.2` becomes `1.3.3`).
+
 Release changelogs are generated from commit subjects. Write subjects for players, describing the visible outcome in clear, concise language.
 
 - Use an imperative, sentence-case summary without a conventional-commit prefix for user-visible changes.
