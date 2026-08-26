@@ -89,16 +89,14 @@ function addon.QueueEllesmereUIChatSync()
 
     syncGeneration = syncGeneration + 1
 
-    -- Existing panels can follow the secured Blizzard selection immediately.
-    -- Keep the queued passes below only for EllesmereUI work that settles on a
-    -- later frame, such as integrating a newly-created whisper window.
-    SyncOwnedPanels()
-    SyncOwnedTabs()
-
     if syncQueued then
         return
     end
 
     syncQueued = true
+    -- Never touch EllesmereUI presentation state synchronously after the
+    -- secured Blizzard selection. Its ghost tabs anchor into Blizzard's dock
+    -- geometry, so immediate refresh work can contaminate persistent dock
+    -- state and surface later in private whisper-history processing.
     C_Timer.After(0, SyncChat)
 end
