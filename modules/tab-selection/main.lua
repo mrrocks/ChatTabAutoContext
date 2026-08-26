@@ -556,14 +556,24 @@ function addon.GetDefaultTarget(frame)
     return GetLatestWhisperTarget(availableMessageTypes)
 end
 
+local HookEditBoxSend
+
 local function GetEditBoxForSend(frame)
     if ChatFrameUtil and type(ChatFrameUtil.ChooseBoxForSend) == "function" then
         local editBox = ChatFrameUtil.ChooseBoxForSend(frame)
         if editBox then
+            if HookEditBoxSend then
+                HookEditBoxSend(editBox)
+            end
             return editBox
         end
     end
-    return GetActiveEditBox()
+
+    local editBox = GetActiveEditBox()
+    if editBox and HookEditBoxSend then
+        HookEditBoxSend(editBox)
+    end
+    return editBox
 end
 
 local function ApplyTarget(editBox, target)
@@ -895,6 +905,39 @@ local function OnEditBoxPostSendText(editBox)
     RememberSelectedTarget(frame, GetEditBoxTarget(editBox))
 end
 
+local hookedSendEditBoxes = setmetatable({}, { __mode = "k" })
+local sendTextHooked = false
+
+HookEditBoxSend = function(editBox)
+    if not editBox
+        or hookedSendEditBoxes[editBox]
+        or type(editBox.SendText) ~= "function"
+    then
+        return false
+    end
+
+    -- XML mixins copy methods onto frames when they are created. Hooking
+    -- ChatFrameEditBoxMixin after login therefore does not affect existing
+    -- edit boxes; secure-hook each concrete edit box instead.
+    hooksecurefunc(editBox, "SendText", OnEditBoxPostSendText)
+    hookedSendEditBoxes[editBox] = true
+    sendTextHooked = true
+    return true
+end
+
+local function HookKnownEditBoxes()
+    if type(CHAT_FRAMES) == "table" then
+        for _, frameName in ipairs(CHAT_FRAMES) do
+            local frame = type(frameName) == "string" and _G[frameName] or frameName
+            if frame then
+                HookEditBoxSend(frame.editBox)
+            end
+        end
+    end
+
+    HookEditBoxSend(GetActiveEditBox())
+end
+
 local function RememberWhisperFromTell(chatType, tellTarget, chatFrame)
     if IsSecret(tellTarget) or not HasValue(tellTarget) then
         return
@@ -932,7 +975,6 @@ end
 
 local openChatHooked = false
 local customTabPressedInstalled = false
-local postSendHooked = false
 
 local function InstallHooks()
     if not openChatHooked and ChatFrameUtil and type(ChatFrameUtil.OpenChat) == "function" then
@@ -956,21 +998,14 @@ local function InstallHooks()
         customTabPressedInstalled = true
     end
 
-    if not postSendHooked
-        and ChatFrameEditBoxMixin
-        and type(ChatFrameEditBoxMixin.SendText) == "function"
-    then
-        -- OnEditBoxPreSendText fires inline immediately before Blizzard calls
-        -- SendChatMessage. Entering addon code there taints the rest of the
-        -- send, so an INSTANCE_CHAT or whisper event delivered on that same
-        -- chain can no longer access Blizzard's private history tables.
-        -- A secure post-hook preserves the session override without putting
-        -- addon execution between Blizzard's message preparation and send.
-        hooksecurefunc(ChatFrameEditBoxMixin, "SendText", OnEditBoxPostSendText)
-        postSendHooked = true
-    end
+    -- OnEditBoxPreSendText fires inline immediately before Blizzard calls
+    -- SendChatMessage. Entering addon code there taints the rest of the send,
+    -- so an INSTANCE_CHAT or whisper event delivered on that same chain can no
+    -- longer access Blizzard's private history tables. Secure post-hooks keep
+    -- override capture after the send without tainting it.
+    HookKnownEditBoxes()
 
-    return openChatHooked and customTabPressedInstalled and postSendHooked
+    return openChatHooked and customTabPressedInstalled and sendTextHooked
 end
 
 if not InstallHooks() then
