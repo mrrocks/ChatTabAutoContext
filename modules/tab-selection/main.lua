@@ -877,7 +877,7 @@ local function OnOpenChat(text, chatFrame)
     addon.ApplyActiveTabContext(chatFrame)
 end
 
-local function OnEditBoxPreSendText(_, editBox)
+local function OnEditBoxPostSendText(editBox)
     if not editBox or type(editBox.GetText) ~= "function" then
         return
     end
@@ -932,7 +932,7 @@ end
 
 local openChatHooked = false
 local customTabPressedInstalled = false
-local preSendHooked = false
+local postSendHooked = false
 
 local function InstallHooks()
     if not openChatHooked and ChatFrameUtil and type(ChatFrameUtil.OpenChat) == "function" then
@@ -956,12 +956,21 @@ local function InstallHooks()
         customTabPressedInstalled = true
     end
 
-    if not preSendHooked and EventRegistry and type(EventRegistry.RegisterCallback) == "function" then
-        EventRegistry:RegisterCallback("ChatFrame.OnEditBoxPreSendText", OnEditBoxPreSendText, addon)
-        preSendHooked = true
+    if not postSendHooked
+        and ChatFrameEditBoxMixin
+        and type(ChatFrameEditBoxMixin.SendText) == "function"
+    then
+        -- OnEditBoxPreSendText fires inline immediately before Blizzard calls
+        -- SendChatMessage. Entering addon code there taints the rest of the
+        -- send, so an INSTANCE_CHAT or whisper event delivered on that same
+        -- chain can no longer access Blizzard's private history tables.
+        -- A secure post-hook preserves the session override without putting
+        -- addon execution between Blizzard's message preparation and send.
+        hooksecurefunc(ChatFrameEditBoxMixin, "SendText", OnEditBoxPostSendText)
+        postSendHooked = true
     end
 
-    return openChatHooked and customTabPressedInstalled and preSendHooked
+    return openChatHooked and customTabPressedInstalled and postSendHooked
 end
 
 if not InstallHooks() then
