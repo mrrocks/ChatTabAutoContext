@@ -1,5 +1,5 @@
 # Changelog
 
-## 1.5.6
+## 1.6.0
 
-- Keep rapid tab cycling synchronized without breaking whispers
+- Prevent whisper history errors inside instances
