@@ -1,5 +1,5 @@
 # Changelog
 
-## 1.6.2
+## 1.6.3
 
-- Remember per-tab chat targets after sending
+- Prevent chat taint from breaking Battle.net whispers
