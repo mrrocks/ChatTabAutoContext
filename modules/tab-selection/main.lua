@@ -41,6 +41,15 @@ local whisperChatTypes = {
     WHISPER = "WHISPER"
 }
 
+-- Battle.net whisper targets are private tokenized values. Reading one from a
+-- Blizzard frame and writing it back through addon execution can taint the
+-- shared chat state, causing ChatHistory_GetAccessID to fail when the next
+-- BN_WHISPER arrives. Native Blizzard code still owns those temporary windows;
+-- only ordinary character whispers are safe for addon-managed targeting.
+local managedWhisperChatTypes = {
+    WHISPER = true
+}
+
 local chatTypeSendRequirements = {
     GUILD = function()
         return IsInGuild()
@@ -366,6 +375,9 @@ local function GetEditBoxTarget(editBox)
         return nil
     end
     if whisperChatTypes[chatType] then
+        if not managedWhisperChatTypes[chatType] then
+            return nil
+        end
         if type(editBox.GetTellTarget) ~= "function" then
             return nil
         end
@@ -467,6 +479,10 @@ local function GetFrameWindowName(frameId)
 end
 
 local function GetWhisperTarget(frame, chatType)
+    if not managedWhisperChatTypes[chatType] then
+        return nil
+    end
+
     local tellTarget = frame.chatTarget
     if IsSecret(tellTarget) then
         return nil
@@ -501,7 +517,7 @@ local function GetLatestWhisperTarget(availableTypes)
     end
 
     local chatType = whisperChatTypes[messageType]
-    if not chatType or not availableTypes[chatType] then
+    if not managedWhisperChatTypes[chatType] or not availableTypes[chatType] then
         return nil
     end
 
@@ -556,28 +572,20 @@ function addon.GetDefaultTarget(frame)
     return GetLatestWhisperTarget(availableMessageTypes)
 end
 
-local HookEditBoxSend
-
 local function GetEditBoxForSend(frame)
     if ChatFrameUtil and type(ChatFrameUtil.ChooseBoxForSend) == "function" then
         local editBox = ChatFrameUtil.ChooseBoxForSend(frame)
         if editBox then
-            if HookEditBoxSend then
-                HookEditBoxSend(editBox)
-            end
             return editBox
         end
     end
 
-    local editBox = GetActiveEditBox()
-    if editBox and HookEditBoxSend then
-        HookEditBoxSend(editBox)
-    end
-    return editBox
+    return GetActiveEditBox()
 end
 
 local function ApplyTarget(editBox, target)
     if not editBox
+        or (whisperChatTypes[target.chatType] and not managedWhisperChatTypes[target.chatType])
         or type(editBox.SetChatType) ~= "function"
         or type(editBox.UpdateHeader) ~= "function"
     then
@@ -595,16 +603,19 @@ local function ApplyTarget(editBox, target)
         if type(editBox.SetChannelTarget) ~= "function" then
             return false
         end
-        editBox:SetChannelTarget(target.channelId)
+        securecallfunction(editBox.SetChannelTarget, editBox, target.channelId)
     elseif whisperChatTypes[target.chatType] then
         if type(editBox.SetTellTarget) ~= "function" then
             return false
         end
-        editBox:SetTellTarget(target.tellTarget)
+        securecallfunction(editBox.SetTellTarget, editBox, target.tellTarget)
     end
 
-    editBox:SetChatType(target.chatType)
-    editBox:UpdateHeader()
+    -- These fields are later consumed by Blizzard's event, temporary-window,
+    -- and chat-configuration paths. Keep the writes in native execution so a
+    -- harmless target change cannot leave those later paths tainted.
+    securecallfunction(editBox.SetChatType, editBox, target.chatType)
+    securecallfunction(editBox.UpdateHeader, editBox)
     return true
 end
 
@@ -634,7 +645,7 @@ local function RememberSelectedTarget(frame, selectedTarget)
     if not frame
         or not selectedTarget
         or not (IsStickyNonWhisperChatType(selectedTarget.chatType)
-            or whisperChatTypes[selectedTarget.chatType])
+            or managedWhisperChatTypes[selectedTarget.chatType])
     then
         return
     end
@@ -850,7 +861,12 @@ function addon.CycleChatTab(editBox, step)
     -- tab advance while the message view remains on the previous frame.
     local frameEditBox = GetEditBoxForSend(nextFrame)
     if frameEditBox ~= editBox then
-        frameEditBox = ChatFrameUtil.OpenChat(pendingText, nextFrame, pendingCursorPosition)
+        frameEditBox = securecallfunction(
+            ChatFrameUtil.OpenChat,
+            pendingText,
+            nextFrame,
+            pendingCursorPosition
+        )
     end
     ApplyTarget(frameEditBox, targets[nextIndex])
     return true
@@ -887,13 +903,8 @@ local function OnOpenChat(text, chatFrame)
     addon.ApplyActiveTabContext(chatFrame)
 end
 
-local function OnEditBoxPostSendText(editBox)
-    if not editBox or type(editBox.GetText) ~= "function" then
-        return
-    end
-
-    local text = editBox:GetText()
-    if IsSecret(text) or not HasValue(text) then
+local function RememberEditBoxTarget(editBox)
+    if not editBox then
         return
     end
 
@@ -906,26 +917,73 @@ local function OnEditBoxPostSendText(editBox)
 end
 
 local hookedSendEditBoxes = setmetatable({}, { __mode = "k" })
-local sendTextHooked = false
+local pendingSendText = setmetatable({}, { __mode = "k" })
+local sendScriptsHooked = false
 
-HookEditBoxSend = function(editBox)
+local function OnEditBoxTextChanged(editBox, userInput)
+    if not editBox or type(editBox.GetText) ~= "function" then
+        return
+    end
+
+    local text = editBox:GetText()
+    if IsSecret(text) then
+        pendingSendText[editBox] = nil
+        return
+    end
+
+    -- Blizzard clears the text programmatically before the OnEnterPressed
+    -- hook runs. Preserve the pending flag across that clear, while still
+    -- honoring a user who deletes all text before pressing Enter.
+    if text == "" and not userInput then
+        return
+    end
+
+    pendingSendText[editBox] = HasValue(text) or nil
+end
+
+local function OnEditBoxEnterPressed(editBox)
+    local hadText = pendingSendText[editBox]
+    pendingSendText[editBox] = nil
+    if hadText then
+        RememberEditBoxTarget(editBox)
+    end
+end
+
+local function HookEditBoxSend(editBox)
     if not editBox
         or hookedSendEditBoxes[editBox]
-        or type(editBox.SendText) ~= "function"
+        or type(editBox.HookScript) ~= "function"
     then
         return false
     end
 
-    -- XML mixins copy methods onto frames when they are created. Hooking
-    -- ChatFrameEditBoxMixin after login therefore does not affect existing
-    -- edit boxes; secure-hook each concrete edit box instead.
-    hooksecurefunc(editBox, "SendText", OnEditBoxPostSendText)
+    local frame = GetFrameForEditBox(editBox)
+    local frameId = frame and type(frame.GetID) == "function" and frame:GetID() or nil
+    if (frame and frame.isTemporary) or type(frameId) ~= "number" or frameId > 10 then
+        return false
+    end
+
+    -- Never use hooksecurefunc(editBox, "SendText", ...). Object-method hooks
+    -- install a wrapper field directly on the Blizzard edit box. A temporary
+    -- whisper creation can later read that tainted object while processing a
+    -- secret target and poison ChatHistory for the rest of the session.
+    -- C-side script hooks do not write method fields; permanent frames only
+    -- are sufficient for remembering normal per-tab sends.
+    editBox:HookScript("OnTextChanged", OnEditBoxTextChanged)
+    editBox:HookScript("OnEnterPressed", OnEditBoxEnterPressed)
     hookedSendEditBoxes[editBox] = true
-    sendTextHooked = true
+    sendScriptsHooked = true
     return true
 end
 
 local function HookKnownEditBoxes()
+    for index = 1, 10 do
+        local frame = _G["ChatFrame" .. index]
+        if frame then
+            HookEditBoxSend(frame.editBox)
+        end
+    end
+
     if type(CHAT_FRAMES) == "table" then
         for _, frameName in ipairs(CHAT_FRAMES) do
             local frame = type(frameName) == "string" and _G[frameName] or frameName
@@ -957,7 +1015,7 @@ local function IsWhisperFrame(frame)
 end
 
 local function OnCustomTabPressed(editBox)
-    if previousCustomTabPressed and previousCustomTabPressed(editBox) then
+    if previousCustomTabPressed and securecallfunction(previousCustomTabPressed, editBox) then
         return true
     end
 
@@ -984,11 +1042,6 @@ local function InstallHooks()
                 RememberWhisperFromTell("WHISPER", name, chatFrame)
             end)
         end
-        if type(ChatFrameUtil.SendBNetTell) == "function" then
-            hooksecurefunc(ChatFrameUtil, "SendBNetTell", function(tokenizedName)
-                RememberWhisperFromTell("BN_WHISPER", tokenizedName)
-            end)
-        end
         openChatHooked = true
     end
 
@@ -999,13 +1052,12 @@ local function InstallHooks()
     end
 
     -- OnEditBoxPreSendText fires inline immediately before Blizzard calls
-    -- SendChatMessage. Entering addon code there taints the rest of the send,
-    -- so an INSTANCE_CHAT or whisper event delivered on that same chain can no
-    -- longer access Blizzard's private history tables. Secure post-hooks keep
-    -- override capture after the send without tainting it.
+    -- SendChatMessage. Entering addon code there taints the rest of the send.
+    -- C-side post-script hooks capture the completed send after Blizzard's
+    -- handler and avoid placing an addon wrapper on any edit-box method.
     HookKnownEditBoxes()
 
-    return openChatHooked and customTabPressedInstalled and sendTextHooked
+    return openChatHooked and customTabPressedInstalled and sendScriptsHooked
 end
 
 if not InstallHooks() then
