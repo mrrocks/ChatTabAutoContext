@@ -54,8 +54,17 @@ local chatTypeSendRequirements = {
     GUILD = function()
         return IsInGuild()
     end,
+    INSTANCE_CHAT = function()
+        return IsInGroup(LE_PARTY_CATEGORY_INSTANCE)
+    end,
     OFFICER = function()
         return IsInGuild()
+    end,
+    PARTY = function()
+        return IsInGroup(LE_PARTY_CATEGORY_HOME)
+    end,
+    RAID = function()
+        return IsInRaid(LE_PARTY_CATEGORY_HOME)
     end,
     RAID_WARNING = function()
         local isLeader = UnitIsGroupLeader("player")
@@ -73,48 +82,8 @@ local chatTypeSendRequirements = {
 
 local sessionOverrides = {}
 
-local chatInputRestrictionTypes = {}
-if Enum and Enum.AddOnRestrictionType then
-    local restrictionTypeNames = {
-        "Encounter",
-        "ChallengeMode",
-        "PvPMatch",
-        "Chat"
-    }
-    for _, name in ipairs(restrictionTypeNames) do
-        local restrictionType = Enum.AddOnRestrictionType[name]
-        if restrictionType ~= nil then
-            chatInputRestrictionTypes[#chatInputRestrictionTypes + 1] = restrictionType
-        end
-    end
-end
-
 local function HasValue(value)
     return value ~= nil and value ~= ""
-end
-
-local function IsChatInputRestricted()
-    if not C_RestrictedActions
-        or type(C_RestrictedActions.GetAddOnRestrictionState) ~= "function"
-        or not Enum
-        or not Enum.AddOnRestrictionState
-    then
-        return false
-    end
-
-    local inactiveState = Enum.AddOnRestrictionState.Inactive
-    if inactiveState == nil then
-        return false
-    end
-
-    for _, restrictionType in ipairs(chatInputRestrictionTypes) do
-        local state = C_RestrictedActions.GetAddOnRestrictionState(restrictionType)
-        if IsSecret(state) or state ~= inactiveState then
-            return true
-        end
-    end
-
-    return false
 end
 
 local function NormalizeTargetName(value)
@@ -592,10 +561,21 @@ local function ApplyTarget(editBox, target)
         return false
     end
 
+    local function ApplyStickyType()
+        if not whisperChatTypes[target.chatType]
+            and type(editBox.SetStickyType) == "function"
+        then
+            securecallfunction(editBox.SetStickyType, editBox, target.chatType)
+        end
+    end
+
     -- Temporary whisper windows already carry Blizzard's native target. Avoid
     -- rewriting the edit-box attributes when the requested context is already
-    -- active, particularly for private whisper values.
+    -- active, particularly for private whisper values. Keep non-whisper sticky
+    -- state synchronized even on a match: Blizzard resets to it after Escape
+    -- and after sending.
     if TargetsMatch(GetEditBoxTarget(editBox), target) then
+        ApplyStickyType()
         return true
     end
 
@@ -615,6 +595,7 @@ local function ApplyTarget(editBox, target)
     -- and chat-configuration paths. Keep the writes in native execution so a
     -- harmless target change cannot leave those later paths tainted.
     securecallfunction(editBox.SetChatType, editBox, target.chatType)
+    ApplyStickyType()
     securecallfunction(editBox.UpdateHeader, editBox)
     return true
 end
@@ -626,6 +607,10 @@ local function GetSessionOverrideTarget(frame)
     end
 
     if override.chatType ~= "CHANNEL" then
+        if not IsChatTypeSendable(override.chatType) then
+            sessionOverrides[frame] = nil
+            return nil
+        end
         return override
     end
 
@@ -641,9 +626,10 @@ local function GetSessionOverrideTarget(frame)
     }
 end
 
-local function RememberSelectedTarget(frame, selectedTarget)
+local function RememberSelectedTarget(frame, selectedTarget, wasManuallySelected)
     if not frame
         or not selectedTarget
+        or not IsChatTypeSendable(selectedTarget.chatType)
         or not (IsStickyNonWhisperChatType(selectedTarget.chatType)
             or managedWhisperChatTypes[selectedTarget.chatType])
     then
@@ -653,6 +639,13 @@ local function RememberSelectedTarget(frame, selectedTarget)
     if not whisperChatTypes[selectedTarget.chatType] or whisperChatTypes[frame.chatType] then
         local defaultTarget = addon.GetDefaultTarget(frame)
         if defaultTarget and TargetsMatch(selectedTarget, defaultTarget) then
+            sessionOverrides[frame] = nil
+            return
+        end
+        if not defaultTarget and not wasManuallySelected then
+            -- SAY can be Blizzard's automatic fallback while a Party, Raid,
+            -- or Instance target is unavailable. Do not let that fallback
+            -- become a tab override that survives after the player joins.
             sessionOverrides[frame] = nil
             return
         end
@@ -689,23 +682,12 @@ local function HasWhisperTellTarget(editBox)
     return IsSecret(tellTarget) or HasValue(tellTarget)
 end
 
-local function HasExplicitWhisperTarget(editBox)
-    if not HasWhisperTellTarget(editBox) then
-        return false
-    end
-
-    local selectedTarget = GetEditBoxTarget(editBox)
-    if not selectedTarget then
-        return true
-    end
-
-    local frame = addon.GetActiveChatFrame() or GetFrameForEditBox(editBox)
-    return not TargetsMatch(GetSessionOverrideTarget(frame), selectedTarget)
-end
-
 local function GetFrameTarget(frame)
     if frame and not IsSecret(frame.chatType) and whisperChatTypes[frame.chatType] then
-        return addon.GetDefaultTarget(frame)
+        -- Temporary conversation windows already carry Blizzard's native
+        -- target. Never reapply it from addon execution: private whisper
+        -- values can become inaccessible in protected instances.
+        return nil
     end
 
     return GetSessionOverrideTarget(frame) or addon.GetDefaultTarget(frame)
@@ -734,176 +716,7 @@ function addon.ApplyActiveTabContext(chatFrame)
     return ApplyFrameTarget(frame, editBox)
 end
 
-function addon.GetChatTab(frame)
-    if type(frame.GetName) ~= "function" then
-        return nil
-    end
-
-    local frameName = frame:GetName()
-    if not frameName then
-        return nil
-    end
-    return _G[frameName .. "Tab"]
-end
-
-local GetChatTab = addon.GetChatTab
-
-function addon.GetDockedChatFrames()
-    if not GENERAL_CHAT_DOCK or type(FCFDock_GetChatFrames) ~= "function" then
-        return nil
-    end
-
-    local dockedFrames = FCFDock_GetChatFrames(GENERAL_CHAT_DOCK)
-    if type(dockedFrames) ~= "table" then
-        return nil
-    end
-
-    return dockedFrames
-end
-
-local function GetCyclableChatFrames()
-    local frames = {}
-    local targets = {}
-    local dockedFrames = addon.GetDockedChatFrames()
-    if not dockedFrames then
-        return frames, targets
-    end
-
-    for _, frame in ipairs(dockedFrames) do
-        local target = frame
-            and frame.editBox
-            and GetChatTab(frame)
-            and GetFrameTarget(frame)
-        if target then
-            frames[#frames + 1] = frame
-            targets[#targets + 1] = target
-        end
-    end
-
-    return frames, targets
-end
-
-local function SelectChatTab(frame)
-    local tab = GetChatTab(frame)
-    if not tab
-        or type(FCF_Tab_OnClick) ~= "function"
-        or type(securecallfunction) ~= "function"
-    then
-        return false
-    end
-
-    -- Blizzard invokes ChatEdit_CustomTabPressed through securecall, but addon
-    -- functions still run tainted. Re-enter Blizzard's native security context
-    -- before its tab handler writes SELECTED_CHAT_FRAME and dock selection state.
-    -- Nil follows the native left-click path. Do not pass an addon-origin
-    -- button string into Blizzard's secured dock-state update.
-    securecallfunction(FCF_Tab_OnClick, tab)
-    if GENERAL_CHAT_DOCK
-        and type(FCFDock_GetSelectedWindow) == "function"
-        and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK) ~= frame
-    then
-        return false
-    end
-
-    addon.QueueEllesmereUIChatSync()
-    return true
-end
-
-function addon.CycleChatTab(editBox, step)
-    if IsChatInputRestricted() then
-        return false
-    end
-
-    local frames, targets = GetCyclableChatFrames()
-    if #frames < 2 then
-        return false
-    end
-
-    local pendingText = type(editBox.GetText) == "function" and editBox:GetText() or nil
-    if IsSecret(pendingText) then
-        return false
-    end
-
-    local pendingCursorPosition = type(editBox.GetCursorPosition) == "function"
-        and editBox:GetCursorPosition()
-        or nil
-    if IsSecret(pendingCursorPosition) then
-        pendingCursorPosition = nil
-    end
-
-    -- Dock selection changes before Blizzard applies the corresponding
-    -- show/hide update. Use that selection directly so repeated keypresses in
-    -- the same frame continue from the newest tab instead of the last visible
-    -- one.
-    local currentFrame = GetSelectedDockedChatFrame() or addon.GetActiveChatFrame()
-    local currentIndex
-    for index, frame in ipairs(frames) do
-        if frame == currentFrame then
-            currentIndex = index
-            break
-        end
-    end
-
-    local nextIndex
-    if currentIndex then
-        nextIndex = (currentIndex - 1 + step) % #frames + 1
-    else
-        nextIndex = step > 0 and 1 or #frames
-    end
-
-    local nextFrame = frames[nextIndex]
-    if nextFrame == currentFrame or not SelectChatTab(nextFrame) then
-        return false
-    end
-
-    -- Classic chat (and EllesmereUI Chat) shares one edit box across docked
-    -- frames. The draft is already there, so reopening it can make the visual
-    -- tab advance while the message view remains on the previous frame.
-    local frameEditBox = GetEditBoxForSend(nextFrame)
-    if frameEditBox ~= editBox then
-        frameEditBox = securecallfunction(
-            ChatFrameUtil.OpenChat,
-            pendingText,
-            nextFrame,
-            pendingCursorPosition
-        )
-    end
-    ApplyTarget(frameEditBox, targets[nextIndex])
-    return true
-end
-
-local function IsWritingCommand(editBox)
-    if type(editBox.GetText) ~= "function" then
-        return false
-    end
-
-    local text = editBox:GetText()
-    if IsSecret(text) then
-        return true
-    end
-    return type(text) == "string" and text:sub(1, 1) == "/"
-end
-
-local function OnOpenChat(text, chatFrame)
-    if IsSecret(text) or HasValue(text) then
-        return
-    end
-    if chatFrame == nil and CHAT_FOCUS_OVERRIDE then
-        return
-    end
-
-    local editBox = GetEditBoxForSend(chatFrame)
-    if editBox and editBox.setText == 1 then
-        local pending = editBox.text
-        if IsSecret(pending) or HasValue(pending) then
-            return
-        end
-    end
-
-    addon.ApplyActiveTabContext(chatFrame)
-end
-
-local function RememberEditBoxTarget(editBox)
+local function RememberEditBoxTarget(editBox, selectedTarget, wasManuallySelected)
     if not editBox then
         return
     end
@@ -913,12 +726,51 @@ local function RememberEditBoxTarget(editBox)
         return
     end
 
-    RememberSelectedTarget(frame, GetEditBoxTarget(editBox))
+    RememberSelectedTarget(frame, selectedTarget, wasManuallySelected)
 end
 
 local hookedSendEditBoxes = setmetatable({}, { __mode = "k" })
 local pendingSendText = setmetatable({}, { __mode = "k" })
+local pendingSendTargets = setmetatable({}, { __mode = "k" })
+local activationTargets = setmetatable({}, { __mode = "k" })
+local contextApplyQueued = setmetatable({}, { __mode = "k" })
 local sendScriptsHooked = false
+
+local function OnEditBoxFocusGained(editBox)
+    activationTargets[editBox] = GetEditBoxTarget(editBox)
+    if contextApplyQueued[editBox] or not C_Timer then
+        return
+    end
+
+    contextApplyQueued[editBox] = true
+    -- IM-style chat keeps its edit box shown after Escape, so OnShow does not
+    -- run on the next Enter. Focus gain occurs for every activation. Defer the
+    -- work until Blizzard's complete OpenChat caller has returned so this hook
+    -- cannot taint state written later in that call.
+    C_Timer.After(0, function()
+        contextApplyQueued[editBox] = nil
+        if type(editBox.HasFocus) == "function" and not editBox:HasFocus() then
+            return
+        end
+        if CHAT_FOCUS_OVERRIDE then
+            return
+        end
+
+        local text = type(editBox.GetText) == "function" and editBox:GetText() or nil
+        if IsSecret(text) or HasValue(text) then
+            return
+        end
+        if editBox.setText == 1 then
+            local pending = editBox.text
+            if IsSecret(pending) or HasValue(pending) then
+                return
+            end
+        end
+
+        addon.ApplyActiveTabContext()
+        activationTargets[editBox] = GetEditBoxTarget(editBox)
+    end)
+end
 
 local function OnEditBoxTextChanged(editBox, userInput)
     if not editBox or type(editBox.GetText) ~= "function" then
@@ -928,6 +780,7 @@ local function OnEditBoxTextChanged(editBox, userInput)
     local text = editBox:GetText()
     if IsSecret(text) then
         pendingSendText[editBox] = nil
+        pendingSendTargets[editBox] = nil
         return
     end
 
@@ -938,14 +791,25 @@ local function OnEditBoxTextChanged(editBox, userInput)
         return
     end
 
-    pendingSendText[editBox] = HasValue(text) or nil
+    local hasText = HasValue(text)
+    pendingSendText[editBox] = hasText or nil
+    pendingSendTargets[editBox] = hasText and GetEditBoxTarget(editBox) or nil
 end
 
 local function OnEditBoxEnterPressed(editBox)
     local hadText = pendingSendText[editBox]
+    local selectedTarget = pendingSendTargets[editBox]
+    local activationTarget = activationTargets[editBox]
     pendingSendText[editBox] = nil
-    if hadText then
-        RememberEditBoxTarget(editBox)
+    pendingSendTargets[editBox] = nil
+    activationTargets[editBox] = nil
+    if hadText and selectedTarget then
+        -- Blizzard's native OnEnterPressed has already cleared the input and
+        -- reset its chat type before HookScript invokes us. Remember the target
+        -- captured while the draft still existed instead of that reset value.
+        local wasManuallySelected = not activationTarget
+            or not TargetsMatch(selectedTarget, activationTarget)
+        RememberEditBoxTarget(editBox, selectedTarget, wasManuallySelected)
     end
 end
 
@@ -969,6 +833,7 @@ local function HookEditBoxSend(editBox)
     -- secret target and poison ChatHistory for the rest of the session.
     -- C-side script hooks do not write method fields; permanent frames only
     -- are sufficient for remembering normal per-tab sends.
+    editBox:HookScript("OnEditFocusGained", OnEditBoxFocusGained)
     editBox:HookScript("OnTextChanged", OnEditBoxTextChanged)
     editBox:HookScript("OnEnterPressed", OnEditBoxEnterPressed)
     hookedSendEditBoxes[editBox] = true
@@ -996,68 +861,14 @@ local function HookKnownEditBoxes()
     HookEditBoxSend(GetActiveEditBox())
 end
 
-local function RememberWhisperFromTell(chatType, tellTarget, chatFrame)
-    if IsSecret(tellTarget) or not HasValue(tellTarget) then
-        return
-    end
-
-    local editBox = GetEditBoxForSend(chatFrame)
-    RememberSelectedTarget(addon.GetActiveChatFrame() or GetFrameForEditBox(editBox), {
-        chatType = chatType,
-        tellTarget = tellTarget
-    })
-end
-
-local previousCustomTabPressed
-
-local function IsWhisperFrame(frame)
-    return frame ~= nil and (IsSecret(frame.chatType) or whisperChatTypes[frame.chatType] ~= nil)
-end
-
-local function OnCustomTabPressed(editBox)
-    if previousCustomTabPressed and securecallfunction(previousCustomTabPressed, editBox) then
-        return true
-    end
-
-    if not editBox or IsWritingCommand(editBox) then
-        return false
-    end
-
-    local selectedFrame = GetSelectedDockedChatFrame() or addon.GetActiveChatFrame()
-    if HasExplicitWhisperTarget(editBox) and not IsWhisperFrame(selectedFrame) then
-        return false
-    end
-
-    return addon.CycleChatTab(editBox, IsShiftKeyDown() and -1 or 1)
-end
-
-local openChatHooked = false
-local customTabPressedInstalled = false
-
 local function InstallHooks()
-    if not openChatHooked and ChatFrameUtil and type(ChatFrameUtil.OpenChat) == "function" then
-        hooksecurefunc(ChatFrameUtil, "OpenChat", OnOpenChat)
-        if type(ChatFrameUtil.SendTellWithMessage) == "function" then
-            hooksecurefunc(ChatFrameUtil, "SendTellWithMessage", function(name, _, chatFrame)
-                RememberWhisperFromTell("WHISPER", name, chatFrame)
-            end)
-        end
-        openChatHooked = true
-    end
-
-    if not customTabPressedInstalled and type(ChatEdit_CustomTabPressed) == "function" then
-        previousCustomTabPressed = ChatEdit_CustomTabPressed
-        ChatEdit_CustomTabPressed = OnCustomTabPressed
-        customTabPressedInstalled = true
-    end
-
     -- OnEditBoxPreSendText fires inline immediately before Blizzard calls
     -- SendChatMessage. Entering addon code there taints the rest of the send.
     -- C-side post-script hooks capture the completed send after Blizzard's
     -- handler and avoid placing an addon wrapper on any edit-box method.
     HookKnownEditBoxes()
 
-    return openChatHooked and customTabPressedInstalled and sendScriptsHooked
+    return sendScriptsHooked
 end
 
 if not InstallHooks() then
@@ -1069,3 +880,66 @@ if not InstallHooks() then
         end
     end)
 end
+
+local lastObservedChatFrame
+local function PrimeFrameContext(frame, preserveActiveInput)
+    if not frame then
+        return
+    end
+
+    local editBox = GetEditBoxForSend(frame)
+    if not editBox or HasWhisperTellTarget(editBox) then
+        return
+    end
+    if preserveActiveInput
+        and type(editBox.HasFocus) == "function"
+        and editBox:HasFocus()
+    then
+        return
+    end
+
+    ApplyFrameTarget(frame, editBox)
+    activationTargets[editBox] = GetEditBoxTarget(editBox)
+end
+
+local selectionWatcher = CreateFrame("Frame")
+selectionWatcher:SetScript("OnUpdate", function()
+    local frame = addon.GetActiveChatFrame()
+    if frame == lastObservedChatFrame then
+        return
+    end
+
+    lastObservedChatFrame = frame
+    if not frame then
+        return
+    end
+
+    -- Observe native selection from our own update pass, completely outside
+    -- Blizzard's hardware-click execution. Prime the shared input while it is
+    -- still closed so EllesmereUI never renders SAY before the focus fallback
+    -- corrects it. This never clicks or selects a chat tab.
+    PrimeFrameContext(frame, false)
+end)
+
+local contextRefreshQueued = false
+local contextEventFrame = CreateFrame("Frame")
+contextEventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+contextEventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+contextEventFrame:RegisterEvent("PLAYER_GUILD_UPDATE")
+contextEventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+contextEventFrame:SetScript("OnEvent", function()
+    if contextRefreshQueued or not C_Timer then
+        return
+    end
+
+    contextRefreshQueued = true
+    -- Group and instance availability can change without selecting another
+    -- tab. Refresh after the event dispatch, but never replace a target while
+    -- the player is already composing a message.
+    C_Timer.After(0, function()
+        contextRefreshQueued = false
+        local frame = addon.GetActiveChatFrame()
+        lastObservedChatFrame = frame
+        PrimeFrameContext(frame, true)
+    end)
+end)
