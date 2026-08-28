@@ -1,5 +1,6 @@
 # Changelog
 
-## 1.6.3
+## 1.7.0
 
-- Prevent chat taint from breaking Battle.net whispers
+- Remove Tab and Shift+Tab cycling because Blizzard tab selection taints whisper history
+- Keep active-tab targeting stable after sends and group changes
