@@ -1,10 +1,10 @@
 # ChatTabAutoContext
 
-WoW addon that opens chat on the active tab's channel or whisper target, remembers per-tab session overrides, and cycles docked tabs with Tab / Shift+Tab.
+WoW addon that opens chat on the active tab's channel or whisper target and remembers per-tab session overrides.
 
 ## Layout
 
-- `modules/tab-selection/` — separately toggleable targeting, session overrides, OpenChat / Tab / SendTell hooks
+- `modules/tab-selection/` — separately toggleable targeting and session overrides
 - `modules/notifications/` — separately toggleable unread-message addon, including EllesmereUI glow replacement
 - `Scripts/Generate-Release-Changelog.ps1` — builds the current release notes from commit subjects
 - `.pkgmeta` — CurseForge packager config
@@ -12,7 +12,7 @@ WoW addon that opens chat on the active tab's channel or whisper target, remembe
 
 ## Taint safety
 
-Blizzard exposes `ChatEdit_CustomTabPressed` for addon hooks and invokes it through `securecall`. Calls from that hook into Blizzard tab-selection code must use `securecallfunction`; a direct `FCF_Tab_OnClick` / `FCFDock_SelectWindow` call taints the dock state and can break Battle.net whisper history when private values are processed.
+Do not select or click Blizzard chat tabs programmatically. Calls to `FCF_Tab_OnClick`, `FCFDock_SelectWindow`, and `Button:Click()` taint the selected-frame and active-edit-box globals even through `securecallfunction`, which can later break whisper history when private values are processed. Leave tab selection to native hardware clicks.
 
 ## Releases
 

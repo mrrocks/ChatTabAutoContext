@@ -6,7 +6,7 @@ A lightweight collection of optional chat enhancements. Enable only the modules 
 
 Keeps your chat input in sync with the tab you are viewing. Pressing **Enter** opens the active tab's channel or whisper target instead of whatever you used last.
 
-Cycle through docked chat tabs with **Tab** and **Shift+Tab**, even while writing—the message and cursor position follow you. Each tab remembers its manually selected channel or whisper target for the session.
+Each tab remembers its manually selected channel or whisper target for the session.
 
 Whispers you start yourself are never overridden.
 
