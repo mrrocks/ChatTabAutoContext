@@ -1,6 +1,5 @@
 # Changelog
 
-## 1.7.0
+## 1.7.1
 
-- Remove Tab and Shift+Tab cycling because Blizzard tab selection taints whisper history
-- Keep active-tab targeting stable after sends and group changes
+- Prevent temporary whispers from causing private-value errors
