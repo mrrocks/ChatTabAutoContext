@@ -119,7 +119,32 @@ local function IsUsableChatFrame(frame)
     if not frame or not frame.editBox then
         return false
     end
-    return type(frame.IsShown) ~= "function" or frame:IsShown()
+    if type(frame.IsShown) ~= "function" then
+        return true
+    end
+
+    local isShown = frame:IsShown()
+    return not IsSecret(isShown) and isShown == true
+end
+
+local function IsPermanentChatFrame(frame)
+    if not frame then
+        return false
+    end
+
+    -- Blizzard's temporary conversation frames can expose private values even
+    -- through otherwise ordinary widget queries such as HasFocus. Keep every
+    -- addon-managed targeting path on the ten persistent chat windows.
+    local isTemporary = frame.isTemporary
+    if IsSecret(isTemporary) or isTemporary then
+        return false
+    end
+
+    local frameId = type(frame.GetID) == "function" and frame:GetID() or nil
+    return not IsSecret(frameId)
+        and type(frameId) == "number"
+        and frameId >= 1
+        and frameId <= 10
 end
 
 local function GetFrameForEditBox(editBox)
@@ -704,7 +729,7 @@ end
 
 function addon.ApplyActiveTabContext(chatFrame)
     local frame = IsUsableChatFrame(chatFrame) and chatFrame or addon.GetActiveChatFrame()
-    if not frame then
+    if not IsPermanentChatFrame(frame) then
         return false
     end
 
@@ -749,8 +774,11 @@ local function OnEditBoxFocusGained(editBox)
     -- cannot taint state written later in that call.
     C_Timer.After(0, function()
         contextApplyQueued[editBox] = nil
-        if type(editBox.HasFocus) == "function" and not editBox:HasFocus() then
-            return
+        if type(editBox.HasFocus) == "function" then
+            local hasFocus = editBox:HasFocus()
+            if IsSecret(hasFocus) or not hasFocus then
+                return
+            end
         end
         if CHAT_FOCUS_OVERRIDE then
             return
@@ -822,8 +850,7 @@ local function HookEditBoxSend(editBox)
     end
 
     local frame = GetFrameForEditBox(editBox)
-    local frameId = frame and type(frame.GetID) == "function" and frame:GetID() or nil
-    if (frame and frame.isTemporary) or type(frameId) ~= "number" or frameId > 10 then
+    if not IsPermanentChatFrame(frame) then
         return false
     end
 
@@ -883,7 +910,7 @@ end
 
 local lastObservedChatFrame
 local function PrimeFrameContext(frame, preserveActiveInput)
-    if not frame then
+    if not IsPermanentChatFrame(frame) then
         return
     end
 
@@ -891,11 +918,11 @@ local function PrimeFrameContext(frame, preserveActiveInput)
     if not editBox or HasWhisperTellTarget(editBox) then
         return
     end
-    if preserveActiveInput
-        and type(editBox.HasFocus) == "function"
-        and editBox:HasFocus()
-    then
-        return
+    if preserveActiveInput and type(editBox.HasFocus) == "function" then
+        local hasFocus = editBox:HasFocus()
+        if IsSecret(hasFocus) or hasFocus then
+            return
+        end
     end
 
     ApplyFrameTarget(frame, editBox)
