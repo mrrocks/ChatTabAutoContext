@@ -81,6 +81,7 @@ local chatTypeSendRequirements = {
 }
 
 local sessionOverrides = {}
+local appliedWhisperTargets = setmetatable({}, { __mode = "k" })
 
 local function HasValue(value)
     return value ~= nil and value ~= ""
@@ -132,9 +133,8 @@ local function IsPermanentChatFrame(frame)
         return false
     end
 
-    -- Blizzard's temporary conversation frames can expose private values even
-    -- through otherwise ordinary widget queries such as HasFocus. Keep every
-    -- addon-managed targeting path on the ten persistent chat windows.
+    -- Keep script hooks on persistent windows. Temporary conversation frames
+    -- can be reused for Battle.net whispers and expose private widget state.
     local isTemporary = frame.isTemporary
     if IsSecret(isTemporary) or isTemporary then
         return false
@@ -145,6 +145,23 @@ local function IsPermanentChatFrame(frame)
         and type(frameId) == "number"
         and frameId >= 1
         and frameId <= 10
+end
+
+local function IsManagedChatFrame(frame)
+    if not frame or IsSecret(frame.chatType) then
+        return false
+    end
+
+    if whisperChatTypes[frame.chatType] then
+        -- Only restore an explicitly available character target. Never infer a
+        -- temporary window's recipient from its label or an old edit-box value.
+        return managedWhisperChatTypes[frame.chatType] == true
+            and not IsSecret(frame.chatTarget)
+            and type(frame.chatTarget) == "string"
+            and frame.chatTarget ~= ""
+    end
+
+    return IsPermanentChatFrame(frame)
 end
 
 local function GetFrameForEditBox(editBox)
@@ -601,6 +618,7 @@ local function ApplyTarget(editBox, target)
     -- and after sending.
     if TargetsMatch(GetEditBoxTarget(editBox), target) then
         ApplyStickyType()
+        appliedWhisperTargets[editBox] = target.chatType == "WHISPER" and target or nil
         return true
     end
 
@@ -622,6 +640,7 @@ local function ApplyTarget(editBox, target)
     securecallfunction(editBox.SetChatType, editBox, target.chatType)
     ApplyStickyType()
     securecallfunction(editBox.UpdateHeader, editBox)
+    appliedWhisperTargets[editBox] = target.chatType == "WHISPER" and target or nil
     return true
 end
 
@@ -687,7 +706,7 @@ local function HasWhisperTellTarget(editBox)
     end
 
     local chatType = editBox:GetChatType()
-    if IsSecret(chatType) then
+    if IsSecret(chatType) or chatType == "BN_WHISPER" then
         return true
     end
 
@@ -695,7 +714,24 @@ local function HasWhisperTellTarget(editBox)
     if IsSecret(stickyType) then
         return true
     end
-    if not whisperChatTypes[chatType] or chatType == stickyType then
+
+    -- A restored tab recipient is not a newly requested whisper. Let the next
+    -- tab replace it, while preserving /w and reply targets chosen by the user.
+    if appliedWhisperTargets[editBox]
+        and TargetsMatch(GetEditBoxTarget(editBox), appliedWhisperTargets[editBox])
+    then
+        return false
+    end
+    if not whisperChatTypes[chatType] then
+        return false
+    end
+
+    local frame = GetFrameForEditBox(editBox)
+    if chatType == stickyType
+        and IsManagedChatFrame(frame)
+        and frame.chatType == "WHISPER"
+        and TargetsMatch(GetEditBoxTarget(editBox), addon.GetDefaultTarget(frame))
+    then
         return false
     end
 
@@ -708,11 +744,14 @@ local function HasWhisperTellTarget(editBox)
 end
 
 local function GetFrameTarget(frame)
-    if frame and not IsSecret(frame.chatType) and whisperChatTypes[frame.chatType] then
-        -- Temporary conversation windows already carry Blizzard's native
-        -- target. Never reapply it from addon execution: private whisper
-        -- values can become inaccessible in protected instances.
+    if not IsManagedChatFrame(frame) then
         return nil
+    end
+
+    if whisperChatTypes[frame.chatType] then
+        -- Conversation frames are pooled. Read their current recipient rather
+        -- than carrying a session override into a reused window.
+        return addon.GetDefaultTarget(frame)
     end
 
     return GetSessionOverrideTarget(frame) or addon.GetDefaultTarget(frame)
@@ -729,7 +768,7 @@ end
 
 function addon.ApplyActiveTabContext(chatFrame)
     local frame = IsUsableChatFrame(chatFrame) and chatFrame or addon.GetActiveChatFrame()
-    if not IsPermanentChatFrame(frame) then
+    if not IsManagedChatFrame(frame) then
         return false
     end
 
@@ -910,7 +949,7 @@ end
 
 local lastObservedChatFrame
 local function PrimeFrameContext(frame, preserveActiveInput)
-    if not IsPermanentChatFrame(frame) then
+    if not IsManagedChatFrame(frame) then
         return
     end
 
