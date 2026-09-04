@@ -1,5 +1,5 @@
 # Changelog
 
-## 1.7.1
+## 1.7.2
 
-- Prevent temporary whispers from causing private-value errors
+- Restore sticky character-whisper tab context
